@@ -1,11 +1,31 @@
 # Changelog
 
+- [0.2.5](#025--pre-v3-quality-gate) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
 - [0.2.4](#024--operational-robustness) — Persistent HTTP client, body_text truncation fix, diagnostic logging, SQLi baseline fix
 - [0.2.3](#023--data-integrity--resource-safety) — Technology commit fix, broader parse error handling, HuntContext context manager, lint cleanup, gather partial results
 - [0.2.2](#022--detection-correctness--defensive-robustness) — IDOR URL path fix, SSRF indicators, auth regex, XSS reflection, subprocess signaling, CLI hardening
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.5 — Pre-V3 Quality Gate
+
+**Date:** 2026-03-31
+**Scope:** 8 files modified, 115 tests passing (0 regressions)
+**Details:** [v1v2-pre-v3-quality-gate.md](completions/v1v2-pre-v3-quality-gate.md)
+
+Final quality gate before V3 development. 4-agent parallel codebase review uncovered 2 critical bugs and 6 correctness/robustness issues that survived prior hardening rounds.
+
+- **Subprocess exit code 0 no longer misreported as -1** — `process.returncode or -1` treated success (0) as falsy; now uses explicit `is not None` check
+- **Scope URL prefix bypass eliminated** — bare `"*"` pattern produced empty prefix that matched every URL via `startswith("")`; empty prefixes now skipped
+- **OOB fallback logs warning** — silent `ImportError` catch no longer masks disabled blind vulnerability detection
+- **Httpx port 0 correctly parsed** — truthiness check replaced with `is not None`
+- **Ffuf warns on multiple targets** — no longer silently drops targets beyond the first
+- **Base adapter logs non-zero exit codes** — tool failures no longer silently return empty results
+- **Browser interception timing corrected** — replaced unreliable Playwright timing value with explicit 0
+- **HTTP compare() handles bytes bodies** — defensive normalization prevents wrong diffs
 
 ---
 

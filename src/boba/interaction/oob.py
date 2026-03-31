@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 import string
 from typing import Any
 
 from boba.core.context import HuntContext
 from boba.core.errors import OOBError
+
+logger = logging.getLogger(__name__)
 
 
 class OOBManager:
@@ -33,6 +36,11 @@ class OOBManager:
             await self._client.register()
         except ImportError:
             # Fall back to a simple mock mode for environments without interactsh
+            logger.warning(
+                "interactsh package not installed — OOB detection disabled. "
+                "Blind SSRF/XSS tests will not detect callbacks. "
+                "Install with: pip install interactsh"
+            )
             self._client = _FallbackOOBClient()
         except Exception as e:
             raise OOBError(f"Failed to initialize Interactsh: {e}")

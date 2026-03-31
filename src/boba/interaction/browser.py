@@ -154,7 +154,11 @@ class BrowserManager:
                 status_code=response.status,
                 response_headers=resp_headers,
                 response_body=body,
-                elapsed_ms=response.request.timing.get("responseEnd", 0),
+                # Playwright timing dict values are relative to navigationStart, not
+                # request-level elapsed time.  We cannot reliably compute per-request
+                # elapsed inside the response handler, so record 0 and let callers
+                # use navigate()'s wall-clock timing for page-level latency.
+                elapsed_ms=0,
                 source="browser",
                 session_name=context_name if context_name != "default" else None,
                 resource_type=response.request.resource_type,

@@ -6,8 +6,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import logging
+
 from boba.adapters.base import BaseAdapter
 from boba.core.models import AdapterConfig, OutputFormat
+
+logger = logging.getLogger(__name__)
 
 
 # Common locations where SecLists might be installed
@@ -40,6 +44,11 @@ class FfufAdapter(BaseAdapter):
     def build_command(
         self, targets: list[str], config: AdapterConfig
     ) -> tuple[list[str], Path]:
+        if len(targets) > 1:
+            logger.warning(
+                "ffuf only supports a single target URL; using first target, "
+                "ignoring %d additional targets", len(targets) - 1,
+            )
         url = targets[0]
         if "FUZZ" not in url:
             url = url.rstrip("/") + "/FUZZ"

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "boba"
-version = "0.2.4"
+version = "0.2.5"
 description = "Agent-native bug bounty hunting framework"
 requires-python = ">=3.11"
 dependencies = [

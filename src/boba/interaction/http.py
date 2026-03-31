@@ -168,17 +168,20 @@ class HttpClient:
             if va != vb:
                 header_diffs.append({"header": key, "a": va, "b": vb})
 
-        # Body diff summary
-        body_a = a.get("response_body") or ""
-        body_b = b.get("response_body") or ""
+        # Body diff summary — normalize to str for comparison.
+        # Bodies from context are always str, but handle bytes defensively.
+        raw_a = a.get("response_body") or ""
+        raw_b = b.get("response_body") or ""
+        body_a = raw_a.decode("utf-8", errors="replace") if isinstance(raw_a, bytes) else raw_a
+        body_b = raw_b.decode("utf-8", errors="replace") if isinstance(raw_b, bytes) else raw_b
         len_a = a.get("response_length") or len(body_a)
         len_b = b.get("response_length") or len(body_b)
 
         if body_a == body_b:
             body_summary = "identical"
         else:
-            lines_a = body_a.splitlines() if isinstance(body_a, str) else []
-            lines_b = body_b.splitlines() if isinstance(body_b, str) else []
+            lines_a = body_a.splitlines()
+            lines_b = body_b.splitlines()
             diff_lines = sum(1 for la, lb in zip(lines_a, lines_b) if la != lb)
             diff_lines += abs(len(lines_a) - len(lines_b))
             body_summary = f"{diff_lines} lines differ (length: {len_a} vs {len_b})"

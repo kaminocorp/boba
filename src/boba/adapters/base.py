@@ -262,6 +262,13 @@ class BaseAdapter(ABC):
 
         try:
             result = await self._execute(cmd, config)
+            if result.exit_code != 0:
+                logger.warning(
+                    "%s exited with code %d%s; stderr: %.200s",
+                    self.TOOL_NAME, result.exit_code,
+                    " (timed out)" if result.timed_out else "",
+                    result.stderr.strip() or "(empty)",
+                )
             records, parse_errors = self.parse_output(result.stdout, output_file)
 
             # Post-filter

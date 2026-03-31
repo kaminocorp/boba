@@ -68,6 +68,10 @@ class ScopeEngine:
 
             elif rule.rule_type == ScopeRuleType.URL_PREFIX:
                 prefix = rule.pattern.rstrip("*").rstrip("/")
+                if not prefix:
+                    # Bare "*" or "/" after stripping — skip, as empty prefix
+                    # would match every URL via startswith("").
+                    continue
                 if rule.action == ScopeAction.INCLUDE:
                     self._url_includes.append(prefix)
                 else:

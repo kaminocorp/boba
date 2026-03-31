@@ -46,7 +46,7 @@ class HttpxRunnerAdapter(BaseAdapter):
         return {
             "host": raw.get("input", ""),
             "ip": a_records[0] if a_records else raw.get("host", ""),
-            "port": int(raw["port"]) if raw.get("port") else None,
+            "port": int(raw["port"]) if raw.get("port") is not None else None,
             "scheme": raw.get("scheme", ""),
             "url": raw.get("url", ""),
             "status_code": raw.get("status_code"),

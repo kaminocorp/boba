@@ -103,7 +103,7 @@ async def run_subprocess(
     return SubprocessResult(
         stdout="".join(stdout_chunks),
         stderr="".join(stderr_chunks),
-        exit_code=process.returncode or -1,
+        exit_code=process.returncode if process.returncode is not None else -1,
         duration=duration,
         timed_out=timed_out,
         output_truncated=output_truncated,
