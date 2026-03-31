@@ -1,0 +1,30 @@
+"""Exception hierarchy for Boba."""
+
+
+class BobaError(Exception):
+    """Base exception for all Boba errors."""
+
+
+class ToolNotFoundError(BobaError):
+    """CLI tool binary not found in PATH."""
+
+
+class ToolTimeoutError(BobaError):
+    """Tool execution exceeded timeout."""
+
+
+class ToolExecutionError(BobaError):
+    """Tool exited with non-zero code."""
+
+    def __init__(self, message: str, exit_code: int, stderr: str):
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.stderr = stderr
+
+
+class ScopeViolationError(BobaError):
+    """Target is outside the defined scope."""
+
+
+class HuntNotFoundError(BobaError):
+    """Hunt ID does not exist in the context database."""
