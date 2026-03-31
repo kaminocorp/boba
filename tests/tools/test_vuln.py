@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -165,6 +164,8 @@ class TestXSS:
     @pytest.mark.asyncio
     async def test_reflected_xss(self, sink):
         """Payload reflected unescaped in response → XSS confirmed."""
+        from urllib.parse import unquote
+
         client = HttpClient(sink)
         call_count = 0
 
@@ -172,8 +173,9 @@ class TestXSS:
             nonlocal call_count
             call_count += 1
             url = kwargs.get("url", "")
-            # Echo back the query parameter (reflected XSS)
-            if "alert(1)" in url:
+            # Server decodes URL params and reflects them (simulating reflected XSS)
+            decoded_url = unquote(url)
+            if "alert(1)" in decoded_url:
                 return _make_response(200, '<p>Search: <script>alert(1)</script></p>', call_count)
             return _make_response(200, "<p>Search: safe</p>", call_count)
 
@@ -213,6 +215,8 @@ class TestSQLi:
     @pytest.mark.asyncio
     async def test_error_based_sqli(self, sink):
         """SQL error string in response → SQLi confirmed."""
+        from urllib.parse import unquote
+
         client = HttpClient(sink)
         call_count = 0
 
@@ -220,7 +224,9 @@ class TestSQLi:
             nonlocal call_count
             call_count += 1
             url = kwargs.get("url", "")
-            if "'" in url:
+            # Server decodes URL params — single quote triggers SQL error
+            decoded_url = unquote(url)
+            if "'" in decoded_url:
                 return _make_response(
                     500,
                     "Error: You have an error in your SQL syntax near ''",

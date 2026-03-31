@@ -20,8 +20,9 @@ SAMPLE_OUTPUT = """\
 @pytest.mark.asyncio
 async def test_parses_json_lines(scope_engine):
     adapter = SubfinderAdapter(scope_engine=scope_engine)
-    records = adapter.parse_output(SAMPLE_OUTPUT)
+    records, parse_errors = adapter.parse_output(SAMPLE_OUTPUT)
     assert len(records) == 4
+    assert parse_errors == 0
     assert records[0]["subdomain"] == "api.example.com"
     assert records[0]["source"] == "crtsh"
 
@@ -29,7 +30,7 @@ async def test_parses_json_lines(scope_engine):
 @pytest.mark.asyncio
 async def test_scope_filters_excluded(scope_engine):
     adapter = SubfinderAdapter(scope_engine=scope_engine)
-    records = adapter.parse_output(SAMPLE_OUTPUT)
+    records, _ = adapter.parse_output(SAMPLE_OUTPUT)
     filtered, count = adapter.post_filter_records(records)
     assert count == 1  # internal.example.com
     hostnames = [r["subdomain"] for r in filtered]

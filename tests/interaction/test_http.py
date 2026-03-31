@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from boba.core.context import HuntContext
 from boba.core.models import FuzzAttackType, Hunt, ScopeConfig
 from boba.interaction.history import HttpHistorySink
 from boba.interaction.http import HttpClient
@@ -29,6 +28,7 @@ def sink(context, hunt_id, tmp_path):
 
 @pytest.fixture
 def client(sink):
+    """Create HttpClient. The persistent client is used for requests."""
     return HttpClient(sink)
 
 
@@ -54,59 +54,44 @@ class TestRequest:
     @pytest.mark.asyncio
     async def test_basic_get(self, client, sink):
         mock_resp = _mock_response(status_code=200, content=b'{"ok": true}', text='{"ok": true}')
-        with patch("boba.interaction.http.httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.request = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        client._client.request = AsyncMock(return_value=mock_resp)
 
-            resp = await client.request(
-                method="GET",
-                url="https://example.com/api",
-                headers={"Accept": "application/json"},
-            )
-            assert resp.status_code == 200
-            assert resp.request_id > 0
-            assert resp.body == b'{"ok": true}'
+        resp = await client.request(
+            method="GET",
+            url="https://example.com/api",
+            headers={"Accept": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert resp.request_id > 0
+        assert resp.body == b'{"ok": true}'
 
-            # Verify persisted to history
-            record = sink.get(resp.request_id)
-            assert record is not None
-            assert record["method"] == "GET"
+        # Verify persisted to history
+        record = sink.get(resp.request_id)
+        assert record is not None
+        assert record["method"] == "GET"
 
     @pytest.mark.asyncio
     async def test_post_with_body(self, client, sink):
         mock_resp = _mock_response(status_code=201, content=b'{"id": 1}', text='{"id": 1}')
-        with patch("boba.interaction.http.httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.request = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        client._client.request = AsyncMock(return_value=mock_resp)
 
-            resp = await client.request(
-                method="POST",
-                url="https://example.com/api/users",
-                headers={"Content-Type": "application/json"},
-                body='{"name": "test"}',
-            )
-            assert resp.status_code == 201
+        resp = await client.request(
+            method="POST",
+            url="https://example.com/api/users",
+            headers={"Content-Type": "application/json"},
+            body='{"name": "test"}',
+        )
+        assert resp.status_code == 201
 
     @pytest.mark.asyncio
     async def test_redirect_chain(self, client):
         redirect_resp = MagicMock()
         redirect_resp.url = "https://example.com/login"
         mock_resp = _mock_response(url="https://example.com/dashboard", history=[redirect_resp])
-        with patch("boba.interaction.http.httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.request = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        client._client.request = AsyncMock(return_value=mock_resp)
 
-            resp = await client.request(method="GET", url="https://example.com/login")
-            assert resp.redirect_chain == ["https://example.com/login"]
+        resp = await client.request(method="GET", url="https://example.com/login")
+        assert resp.redirect_chain == ["https://example.com/login"]
 
 
 class TestReplay:
@@ -128,22 +113,17 @@ class TestReplay:
         mock_resp = _mock_response(
             status_code=200, content=b'{"id": 123}', text='{"id": 123}'
         )
-        with patch("boba.interaction.http.httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.request = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        client._client.request = AsyncMock(return_value=mock_resp)
 
-            resp = await client.replay(rid, modifications={
-                "headers": {"Authorization": "Bearer tok_b"},
-            })
-            assert resp.status_code == 200
+        resp = await client.replay(rid, modifications={
+            "headers": {"Authorization": "Bearer tok_b"},
+        })
+        assert resp.status_code == 200
 
-            # Should be linked to parent
-            record = sink.get(resp.request_id)
-            assert record["parent_request_id"] == rid
-            assert record["source"] == "replay"
+        # Should be linked to parent
+        record = sink.get(resp.request_id)
+        assert record["parent_request_id"] == rid
+        assert record["source"] == "replay"
 
     @pytest.mark.asyncio
     async def test_replay_nonexistent_raises(self, client):

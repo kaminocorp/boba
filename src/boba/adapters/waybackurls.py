@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,6 +16,10 @@ class WaybackurlsAdapter(BaseAdapter):
     OUTPUT_FORMAT = OutputFormat.PLAIN_LINES
     PRODUCES = "url"
     SCOPE_MODE = "post"
+
+    def __init__(self, scope_engine):
+        super().__init__(scope_engine)
+        self._stdin_targets: list[str] = []
 
     def install_hint(self) -> str:
         return "go install -v github.com/tomnomnom/waybackurls@latest"

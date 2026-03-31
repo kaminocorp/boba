@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from boba.adapters.nuclei import NucleiAdapter
-from boba.core.models import AdapterConfig, SubprocessResult
+from boba.core.models import AdapterConfig
 
 
 SAMPLE_NUCLEI_OUTPUT = json.dumps({
@@ -98,8 +97,9 @@ class TestBuildCommand:
 class TestParseOutput:
     def test_parse_multi_line_output(self, adapter):
         stdout = SAMPLE_NUCLEI_OUTPUT + "\n" + SAMPLE_NUCLEI_LINE_2
-        records = adapter.parse_output(stdout)
+        records, parse_errors = adapter.parse_output(stdout)
         assert len(records) == 2
+        assert parse_errors == 0
         assert records[0]["template_id"] == "exposed-env-file"
         assert records[1]["template_id"] == "git-config"
 

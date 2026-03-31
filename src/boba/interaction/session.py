@@ -94,6 +94,7 @@ class SessionManager:
 
         for field_name, value in credentials.items():
             # Try common selectors
+            filled = False
             for selector in [
                 f"[name='{field_name}']",
                 f"#{field_name}",
@@ -101,11 +102,18 @@ class SessionManager:
             ]:
                 try:
                     await page.fill(selector, value)
+                    filled = True
                     break
                 except Exception:
                     continue
+            if not filled:
+                raise SessionError(
+                    f"Could not find form field '{field_name}' on {login_url}. "
+                    f"Tried selectors: [name=], #id, [id=]"
+                )
 
         # Submit — try various common patterns
+        submitted = False
         for submit_selector in [
             "[type='submit']",
             "button[type='submit']",
@@ -116,9 +124,15 @@ class SessionManager:
         ]:
             try:
                 await page.click(submit_selector)
+                submitted = True
                 break
             except Exception:
                 continue
+        if not submitted:
+            raise SessionError(
+                f"Could not find submit button on {login_url}. "
+                "Tried: [type='submit'], button, input, text patterns."
+            )
 
         await page.wait_for_load_state("networkidle")
 

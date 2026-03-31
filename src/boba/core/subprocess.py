@@ -10,18 +10,22 @@ from collections.abc import AsyncIterator, Callable
 from boba.core.models import SubprocessResult
 
 
+_MAX_OUTPUT_BYTES = 256 * 1024 * 1024  # 256 MB cap to prevent OOM
+
+
 async def run_subprocess(
     cmd: list[str],
     timeout_seconds: int = 300,
     env_vars: dict[str, str] | None = None,
     stdin_data: str | None = None,
     on_stdout_line: Callable[[str], None] | None = None,
+    max_output_bytes: int = _MAX_OUTPUT_BYTES,
 ) -> SubprocessResult:
     """
     Execute a subprocess asynchronously.
 
-    Captures stdout/stderr line-by-line (memory-bounded). On timeout, sends
-    SIGKILL and preserves partial output.
+    Captures stdout/stderr line-by-line with a size cap to prevent OOM.
+    On timeout, sends SIGKILL and preserves partial output.
 
     Args:
         cmd: Command and arguments.
@@ -29,6 +33,7 @@ async def run_subprocess(
         env_vars: Additional env vars merged with os.environ.
         stdin_data: Data to pipe to stdin.
         on_stdout_line: Optional callback for each stdout line.
+        max_output_bytes: Maximum bytes to capture before truncating (default 256MB).
     """
     env = os.environ.copy()
     if env_vars:
@@ -47,16 +52,24 @@ async def run_subprocess(
 
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    total_bytes = 0
+    output_truncated = False
 
     async def read_stream(
         stream: asyncio.StreamReader,
         chunks: list[str],
         callback: Callable[[str], None] | None = None,
     ) -> None:
+        nonlocal total_bytes, output_truncated
         while True:
             line = await stream.readline()
             if not line:
                 break
+            total_bytes += len(line)
+            if total_bytes > max_output_bytes:
+                # Stop accumulating to prevent OOM, but keep reading to drain
+                output_truncated = True
+                continue
             decoded = line.decode("utf-8", errors="replace")
             chunks.append(decoded)
             if callback:
@@ -64,9 +77,11 @@ async def run_subprocess(
 
     try:
         if stdin_data and process.stdin:
-            process.stdin.write(stdin_data.encode())
-            await process.stdin.drain()
-            process.stdin.close()
+            try:
+                process.stdin.write(stdin_data.encode())
+                await process.stdin.drain()
+            finally:
+                process.stdin.close()
 
         timeout = timeout_seconds if timeout_seconds > 0 else None
         await asyncio.wait_for(
@@ -91,6 +106,7 @@ async def run_subprocess(
         exit_code=process.returncode or -1,
         duration=duration,
         timed_out=timed_out,
+        output_truncated=output_truncated,
     )
 
 

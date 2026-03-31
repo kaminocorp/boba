@@ -1,7 +1,91 @@
 # Changelog
 
+- [0.2.4](#024--operational-robustness) — Persistent HTTP client, body_text truncation fix, diagnostic logging, SQLi baseline fix
+- [0.2.3](#023--data-integrity--resource-safety) — Technology commit fix, broader parse error handling, HuntContext context manager, lint cleanup, gather partial results
+- [0.2.2](#022--detection-correctness--defensive-robustness) — IDOR URL path fix, SSRF indicators, auth regex, XSS reflection, subprocess signaling, CLI hardening
+- [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.4 — Operational Robustness
+
+**Date:** 2026-03-31
+**Scope:** 6 files modified, 1 test file updated, 115 tests passing (0 regressions)
+**Details:** [v1v2-operational-robustness.md](completions/v1v2-operational-robustness.md)
+
+Final quality gate before V3 development. Addresses runtime reliability and debuggability issues found during a comprehensive 5-agent codebase audit.
+
+- **Response body_text no longer truncated** — removed silent 8KB cap that caused vuln detection tools to miss evidence in longer responses
+- **Persistent HttpClient** — connection pool reused across requests instead of create/destroy per call; `async with` lifecycle support
+- **Diagnostic logging in 20+ catch blocks** — all JSON decode failures in context.py, parse errors in base adapter, and browser interception errors now emit warnings/debug logs with entity IDs and exception details
+- **SQL table name validation** — `get_hunt_stats()` uses immutable `frozenset` allowlist instead of inline list
+- **Browser shutdown ordering** — pages closed before their parent contexts to prevent race conditions in async handlers
+- **SQLi baseline includes test parameter** — boolean-based detection now compares against structurally identical baseline request
+
+---
+
+## 0.2.3 — Data Integrity & Resource Safety
+
+**Date:** 2026-03-31
+**Scope:** 8 files modified, 115 tests passing (0 regressions)
+**Details:** [v1v2-pre-v3-fixes.md](completions/v1v2-pre-v3-fixes.md)
+
+Pre-V3 pass targeting transaction safety, exception handling completeness, and resource lifecycle.
+
+- **Technology records committed to database** — `upsert_technology` added to `upsert_records()` dispatch table; `recon.tech()` rewritten to use batch path
+- **Broader parse_record() exception handling** — JSON_LINES, JSON_OBJECT, JSON_ARRAY handlers now catch `Exception` (matching PLAIN_LINES), preventing one bad record from crashing the entire run
+- **HuntContext context manager** — `__enter__`/`__exit__` for automatic SQLite cleanup
+- **37 lint errors resolved** — unused imports and variable assignments across 15 files
+- **HTTP body file naming** — UUID-based (collision-free) instead of glob-counter (race-prone)
+- **Browser context cleanup on setup failure** — context registered only after page+interception succeed
+- **`asyncio.gather()` partial results** — `recon.urls()` uses `return_exceptions=True` so one adapter failure doesn't discard the other's results
+
+---
+
+## 0.2.2 — Detection Correctness & Defensive Robustness
+
+**Date:** 2026-03-31
+**Scope:** 10 files modified, 115 tests passing (0 regressions)
+**Details:** [v1v2-hardening.md](completions/v1v2-hardening.md)
+
+Second quality pass targeting detection accuracy in the 5 vuln tools and defensive robustness in adapter/interaction/persistence layers.
+
+- **IDOR URL path manipulation** — `urlparse`/`urlunparse` instead of naive `str.replace()` that corrupted URLs with trailing slashes or duplicate segments
+- **SSRF indicator list unconditional** — `"internal server error"` checked for all SSRF vectors, not just localhost
+- **Auth endpoint regex** — path-boundary matching (`/admin/`, `/admin?`) instead of substring (`/gadmin`, `/administrator`)
+- **XSS partial reflection** — extracts inner content between tags with 8-char minimum, reducing false positives
+- **Version sync** — `__version__` updated to 0.2.0 to match pyproject.toml
+- **JSON decode safety in V2 methods** — `get_session()`, `get_sessions()`, `get_findings()`, `get_oob_listeners()` wrapped with try/except
+- **Subprocess stdin cleanup** — try/finally ensures pipe closed even on drain failure
+- **Subprocess truncation signal** — `output_truncated` field on `SubprocessResult`
+- **PLAIN_LINES error handling** — matches JSON format handlers' try/except pattern
+- **Session login_form validation** — raises `SessionError` if no selectors match instead of returning silently
+- **OOB listener matching** — `startswith` instead of substring `in` check
+- **CLI hardening** — required URL param, comma whitespace stripping, help text, format validation
+
+---
+
+## 0.2.1 — Code Quality & Correctness
+
+**Date:** 2026-03-31
+**Scope:** 12 files modified, 115 tests passing (0 regressions)
+**Details:** [v1v2-refinements.md](completions/v1v2-refinements.md)
+
+First quality pass addressing correctness, safety, and robustness issues across the V1/V2 codebase.
+
+- **IPv6 scope handling** — new `_strip_port()` method correctly handles bracketed IPv6, bare IPv6, and IPv4 with ports
+- **URL encoding for vuln payloads** — new `_inject_param()` helper uses `urlparse`/`urlencode` instead of raw string concatenation across all 9 injection points
+- **WaybackurlsAdapter initialization** — `_stdin_targets` initialized in `__init__` to prevent `AttributeError`
+- **Parse error tracking** — `parse_output()` returns `(records, parse_errors)` tuple; `parse_errors` field on `ToolResult`
+- **Async context managers** — `BrowserManager` and `OOBManager` support `async with`
+- **Temp file safety** — `mktemp()` replaced with `NamedTemporaryFile` in whatweb and ffuf adapters
+- **JSON decode safety** — `_row_to_hunt()`, `get_http_record()`, `query_http_history()` wrapped with try/except
+- **Scope rule validation** — malformed patterns caught at compile time instead of match time
+- **IDOR similarity check** — three-stage comparison (exact → SHA-256 → structural line overlap) instead of length-only
+- **SQLi boolean threshold** — dual threshold (absolute 20 bytes OR relative 5%) instead of fixed 50 bytes
+- **Output size bounding** — 256MB cap on subprocess stdout accumulation
 
 ---
 

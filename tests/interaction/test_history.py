@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from boba.core.context import HuntContext
 from boba.core.models import Hunt, ScopeConfig
 from boba.interaction.history import BODY_INLINE_LIMIT, HttpHistorySink
 

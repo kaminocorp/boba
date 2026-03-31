@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
-from boba.core.context import HuntContext
 from boba.core.models import Hunt, ScopeConfig
 
 

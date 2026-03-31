@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+import re
+from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
 
 from boba.core.models import (
     Confidence,
@@ -16,6 +18,21 @@ from boba.payloads import sqli as sqli_payloads
 from boba.payloads import ssrf as ssrf_payloads
 from boba.payloads import xss as xss_payloads
 from boba.payloads import auth as auth_payloads
+
+
+def _inject_param(url: str, param_name: str, value: str) -> str:
+    """Inject a parameter into a URL with proper encoding.
+
+    Preserves existing query parameters and encodes the value correctly,
+    preventing payload characters like & # = from breaking URL structure.
+    """
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    existing_params = parse_qs(parsed.query, keep_blank_values=True)
+    # Flatten: parse_qs returns lists, we want the last value
+    flat = {k: v[-1] for k, v in existing_params.items()}
+    flat[param_name] = value
+    new_query = urlencode(flat, quote_via=quote)
+    return urlunparse(parsed._replace(query=new_query))
 
 
 async def test_idor(
@@ -105,7 +122,11 @@ async def test_idor(
     # Test additional object IDs if provided
     if object_ids and vulnerable:
         for obj_id in object_ids:
-            test_url = endpoint.replace(endpoint.split("/")[-1], obj_id)
+            # Replace the last path segment with the new object ID
+            parsed_ep = urlparse(endpoint)
+            path_parts = parsed_ep.path.rstrip("/").split("/")
+            path_parts[-1] = obj_id
+            test_url = urlunparse(parsed_ep._replace(path="/".join(path_parts)))
             resp = await http_client.request(
                 method=method, url=test_url,
                 headers=session_b.headers, cookies=session_b.cookies,
@@ -159,13 +180,8 @@ async def test_ssrf(
         param_name = point.get("name", "url")
 
         for payload in payloads:
-            # Build the request with injected payload
-            test_url = url
-
-            if "?" in url:
-                test_url = f"{url}&{param_name}={payload}"
-            else:
-                test_url = f"{url}?{param_name}={payload}"
+            # Build the request with injected payload (properly URL-encoded)
+            test_url = _inject_param(url, param_name, payload)
 
             resp = await http_client.request(
                 method=method, url=test_url,
@@ -181,10 +197,10 @@ async def test_ssrf(
                 "root:", "/bin/bash",  # /etc/passwd
                 "ami-", "instance-id",  # AWS metadata
                 "computeMetadata",  # GCP metadata
-                "internal server error" if "127.0.0.1" in payload else None,
+                "internal server error",  # generic server-side error
             ]
             for indicator in ssrf_indicators:
-                if indicator and indicator in body_lower:
+                if indicator in body_lower:
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
                     evidence.append({
@@ -218,11 +234,7 @@ async def test_ssrf(
             )
             oob_url = oob_manager.get_payload_url(callback)
 
-            test_url = url
-            if "?" in url:
-                test_url = f"{url}&{param_name}={oob_url}"
-            else:
-                test_url = f"{url}?{param_name}={oob_url}"
+            test_url = _inject_param(url, param_name, oob_url)
 
             resp = await http_client.request(
                 method=method, url=test_url,
@@ -286,9 +298,8 @@ async def test_xss(
 
     for param_name in test_params:
         for payload in payloads:
-            # Build URL with injected payload
-            sep = "&" if "?" in url else "?"
-            test_url = f"{url}{sep}{param_name}={payload}"
+            # Build URL with injected payload (properly URL-encoded)
+            test_url = _inject_param(url, param_name, payload)
 
             resp = await http_client.request(
                 method=method, url=test_url,
@@ -309,14 +320,16 @@ async def test_xss(
                 })
                 break  # Found confirmed XSS for this param
 
-            # Check for partial reflection (encoded but still dangerous)
-            stripped = payload.replace("<", "").replace(">", "")
-            if stripped and len(stripped) > 5 and stripped in resp.body_text:
+            # Check for partial reflection: extract inner content between tags
+            # e.g. "<script>alert(1)</script>" → check for "alert(1)"
+            inner = re.sub(r"<[^>]*>", "", payload).strip()
+            if inner and len(inner) >= 8 and inner in resp.body_text:
                 confidence = Confidence.POSSIBLE
                 evidence.append({
                     "type": "partial_reflection",
                     "payload": payload,
                     "param": param_name,
+                    "note": f"Inner content '{inner}' reflected without tags",
                     "request_id": resp.request_id,
                 })
 
@@ -327,8 +340,7 @@ async def test_xss(
     if check_dom and browser and not vulnerable:
         for param_name in test_params:
             for canary in xss_payloads.DOM_CANARY:
-                sep = "&" if "?" in url else "?"
-                test_url = f"{url}{sep}{param_name}={canary}"
+                test_url = _inject_param(url, param_name, canary)
                 await browser.navigate(test_url)
                 fired = await browser.execute_js("() => window.__xss_fired === true")
                 if fired:
@@ -381,19 +393,19 @@ async def test_sqli(
 
     test_params = params or {"id": "1"}
 
-    # Baseline request
-    resp_baseline = await http_client.request(
-        method=method, url=url,
-        headers=headers, cookies=cookies,
-        source="test_sqli", tags=["sqli", "baseline"],
-    )
-    request_ids.append(resp_baseline.request_id)
-
     for param_name, default_val in test_params.items():
+        # Baseline: request with the normal parameter value, so true/false comparisons
+        # are against the same endpoint shape (not the bare URL without the param).
+        baseline_url = _inject_param(url, param_name, default_val)
+        resp_baseline = await http_client.request(
+            method=method, url=baseline_url,
+            headers=headers, cookies=cookies,
+            source="test_sqli", tags=["sqli", "baseline"],
+        )
+        request_ids.append(resp_baseline.request_id)
         # Error-based detection
         for payload in payloads:
-            sep = "&" if "?" in url else "?"
-            test_url = f"{url}{sep}{param_name}={default_val}{payload}"
+            test_url = _inject_param(url, param_name, f"{default_val}{payload}")
 
             resp = await http_client.request(
                 method=method, url=test_url,
@@ -426,24 +438,29 @@ async def test_sqli(
         true_payload = "' AND '1'='1"
         false_payload = "' AND '1'='2"
 
-        sep = "&" if "?" in url else "?"
         resp_true = await http_client.request(
-            method=method, url=f"{url}{sep}{param_name}={default_val}{true_payload}",
+            method=method,
+            url=_inject_param(url, param_name, f"{default_val}{true_payload}"),
             headers=headers, cookies=cookies,
             source="test_sqli", tags=["sqli", "boolean_true"],
         )
         resp_false = await http_client.request(
-            method=method, url=f"{url}{sep}{param_name}={default_val}{false_payload}",
+            method=method,
+            url=_inject_param(url, param_name, f"{default_val}{false_payload}"),
             headers=headers, cookies=cookies,
             source="test_sqli", tags=["sqli", "boolean_false"],
         )
         request_ids.extend([resp_true.request_id, resp_false.request_id])
 
-        # If true/false conditions produce different response lengths, likely SQLi
+        # If true/false conditions produce different response lengths, likely SQLi.
+        # Use both absolute and relative thresholds to catch small and large responses.
         len_diff = abs(len(resp_true.body) - len(resp_false.body))
+        baseline_len = max(len(resp_baseline.body), 1)
+        relative_diff = len_diff / baseline_len
         if (
             resp_true.status_code == resp_false.status_code
-            and len_diff > 50
+            and (len_diff > 20 or relative_diff > 0.05)
+            and len_diff > 0
             and resp_true.status_code == resp_baseline.status_code
         ):
             vulnerable = True
@@ -558,19 +575,19 @@ async def test_auth(
         request_ids.append(resp_auth.request_id)
 
         # If regular user can access, check if it looks like an admin endpoint
-        admin_indicators = ["/admin", "/manage", "/internal", "/superuser"]
+        # Use regex with path-boundary matching to avoid false positives
+        # like /gadmin or /read-admin-guide
+        _ADMIN_RE = re.compile(r"/(admin|manage|internal|superuser)([/?#]|$)", re.IGNORECASE)
         if 200 <= resp_auth.status_code < 400:
-            for indicator in admin_indicators:
-                if indicator in endpoint.lower():
-                    vulnerable = True
-                    confidence = Confidence.LIKELY
-                    evidence.append({
-                        "type": "privilege_escalation",
-                        "endpoint": endpoint,
-                        "status_code": resp_auth.status_code,
-                        "note": f"User '{session.name}' can access admin-like endpoint",
-                    })
-                    break
+            if _ADMIN_RE.search(endpoint):
+                vulnerable = True
+                confidence = Confidence.LIKELY
+                evidence.append({
+                    "type": "privilege_escalation",
+                    "endpoint": endpoint,
+                    "status_code": resp_auth.status_code,
+                    "note": f"User '{session.name}' can access admin-like endpoint",
+                })
 
     return VulnTestResult(
         test_type="auth",
@@ -590,10 +607,28 @@ async def test_auth(
 
 
 def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> bool:
-    """Check if two response bodies are similar enough to indicate same content."""
+    """Check if two response bodies are similar enough to indicate same content.
+
+    Uses both exact content hash comparison and length-ratio heuristic.
+    This prevents false positives from two different resources that happen
+    to be the same length.
+    """
     if body_a == body_b:
         return True
     if not body_a or not body_b:
         return False
+    # Exact content match via hash — fast path for large identical bodies
+    import hashlib
+    if hashlib.sha256(body_a).digest() == hashlib.sha256(body_b).digest():
+        return True
+    # Length-ratio heuristic — bodies must be similar length AND share structural overlap
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
-    return len_ratio > threshold
+    if len_ratio <= threshold:
+        return False
+    # Check for structural overlap: shared lines as a fraction of total unique lines
+    lines_a = set(body_a.split(b"\n"))
+    lines_b = set(body_b.split(b"\n"))
+    if not lines_a or not lines_b:
+        return len_ratio > threshold
+    overlap = len(lines_a & lines_b) / max(len(lines_a | lines_b), 1)
+    return overlap > threshold

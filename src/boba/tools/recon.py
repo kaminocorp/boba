@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import logging
 
 from boba.adapters.gau import GauAdapter
 from boba.adapters.httpx_runner import HttpxRunnerAdapter
@@ -14,6 +14,8 @@ from boba.adapters.whatweb import WhatwebAdapter
 from boba.core.context import HuntContext
 from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
+
+logger = logging.getLogger(__name__)
 
 
 async def subdomains(
@@ -107,30 +109,35 @@ async def urls(
     gau_adapter = GauAdapter(scope_engine=scope)
     wayback_adapter = WaybackurlsAdapter(scope_engine=scope)
 
-    gau_result, wayback_result = await asyncio.gather(
+    results = await asyncio.gather(
         gau_adapter.run(targets=domains, config=config),
         wayback_adapter.run(targets=domains, config=config),
+        return_exceptions=True,
     )
 
-    # Persist both — upsert handles dedup, merges sources
-    context.upsert_records(hunt.id, "url", gau_result.records, source="gau")
-    context.upsert_records(hunt.id, "url", wayback_result.records, source="waybackurls")
+    all_records: list[dict] = []
+    total_filtered = 0
+    max_duration = 0.0
 
-    context.log_tool_run(hunt.id, gau_result)
-    context.log_tool_run(hunt.id, wayback_result)
+    for result, name in zip(results, ["gau", "waybackurls"]):
+        if isinstance(result, Exception):
+            logger.warning("%s failed: %s", name, result)
+            continue
+        context.upsert_records(hunt.id, "url", result.records, source=name)
+        context.log_tool_run(hunt.id, result)
+        all_records.extend(result.records)
+        total_filtered += result.filtered_count
+        max_duration = max(max_duration, result.duration_seconds)
 
-    # Return combined result
     return ToolResult(
         tool_name="recon.urls",
         command=[],
         exit_code=0,
         raw_stdout="",
         raw_stderr="",
-        duration_seconds=max(
-            gau_result.duration_seconds, wayback_result.duration_seconds
-        ),
-        records=gau_result.records + wayback_result.records,
-        filtered_count=gau_result.filtered_count + wayback_result.filtered_count,
+        duration_seconds=max_duration,
+        records=all_records,
+        filtered_count=total_filtered,
     )
 
 
@@ -157,10 +164,14 @@ async def tech(
     result = await adapter.run(targets=targets, config=config)
 
     # Whatweb records contain nested technologies — flatten for persistence
+    flat_techs = []
     for record in result.records:
         host = record.get("host", "")
         for t in record.get("technologies", []):
-            context.upsert_technology(hunt.id, host, t, source="whatweb")
+            t["host"] = host
+            flat_techs.append(t)
+    if flat_techs:
+        context.upsert_records(hunt.id, "technology", flat_techs, source="whatweb")
     context.log_tool_run(hunt.id, result)
     return result
 

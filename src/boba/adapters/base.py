@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
@@ -13,6 +14,8 @@ from boba.core.errors import ToolNotFoundError
 from boba.core.models import AdapterConfig, OutputFormat, SubprocessResult, ToolResult
 from boba.core.scope import ScopeEngine
 from boba.core.subprocess import run_subprocess
+
+logger = logging.getLogger(__name__)
 
 
 class BaseAdapter(ABC):
@@ -138,13 +141,17 @@ class BaseAdapter(ABC):
 
     def parse_output(
         self, stdout: str, output_file: Path | None = None
-    ) -> list[dict[str, Any]]:
-        """Parse full tool output into records, delegating to parse_record."""
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Parse full tool output into records, delegating to parse_record.
+
+        Returns (records, parse_error_count) so callers can surface data loss.
+        """
         raw_text = stdout
         if output_file and output_file.exists():
             raw_text = output_file.read_text()
 
         records: list[dict[str, Any]] = []
+        parse_errors = 0
 
         if self.OUTPUT_FORMAT == OutputFormat.JSON_LINES:
             for line in raw_text.strip().splitlines():
@@ -154,34 +161,68 @@ class BaseAdapter(ABC):
                 try:
                     raw = json.loads(line)
                     records.append(self.parse_record(raw))
-                except (json.JSONDecodeError, KeyError):
+                except Exception as exc:
+                    parse_errors += 1
+                    logger.debug("%s: failed to parse line: %s", self.TOOL_NAME, exc)
                     continue
+            if parse_errors:
+                logger.warning(
+                    "%s: %d lines failed to parse (out of %d total)",
+                    self.TOOL_NAME, parse_errors,
+                    parse_errors + len(records),
+                )
 
         elif self.OUTPUT_FORMAT == OutputFormat.JSON_OBJECT:
             try:
                 raw = json.loads(raw_text)
                 items = raw if isinstance(raw, list) else raw.get("results", [raw])
                 for item in items:
-                    records.append(self.parse_record(item))
-            except (json.JSONDecodeError, KeyError):
-                pass
+                    try:
+                        records.append(self.parse_record(item))
+                    except Exception as exc:
+                        parse_errors += 1
+                        logger.debug("%s: failed to parse record: %s", self.TOOL_NAME, exc)
+            except json.JSONDecodeError:
+                parse_errors += 1
+                logger.warning(
+                    "%s: failed to parse JSON output (%d bytes)",
+                    self.TOOL_NAME, len(raw_text),
+                )
 
         elif self.OUTPUT_FORMAT == OutputFormat.PLAIN_LINES:
             for line in raw_text.strip().splitlines():
                 line = line.strip()
                 if line:
-                    records.append(self.parse_record(line))
+                    try:
+                        records.append(self.parse_record(line))
+                    except Exception as exc:
+                        parse_errors += 1
+                        logger.debug("%s: failed to parse line: %s", self.TOOL_NAME, exc)
+            if parse_errors:
+                logger.warning(
+                    "%s: %d lines failed to parse (out of %d total)",
+                    self.TOOL_NAME, parse_errors,
+                    parse_errors + len(records),
+                )
 
         elif self.OUTPUT_FORMAT == OutputFormat.JSON_ARRAY:
             try:
                 items = json.loads(raw_text)
                 if isinstance(items, list):
                     for item in items:
-                        records.append(self.parse_record(item))
-            except (json.JSONDecodeError, KeyError):
-                pass
+                        try:
+                            records.append(self.parse_record(item))
+                        except Exception as exc:
+                            parse_errors += 1
+                            logger.debug("%s: failed to parse record: %s", self.TOOL_NAME, exc)
+            except json.JSONDecodeError:
+                parse_errors += 1
+                logger.warning(
+                    "%s: failed to parse JSON array output (%d bytes)",
+                    self.TOOL_NAME, len(raw_text),
+                )
 
-        return records
+        return records, parse_errors
 
     # ── Phase 6: Orchestration ──
 
@@ -200,7 +241,7 @@ class BaseAdapter(ABC):
         8. return ToolResult
         """
         config = config or AdapterConfig()
-        binary = self.find_binary()
+        self.find_binary()
 
         # Pre-filter
         if self.SCOPE_MODE in ("pre", "both"):
@@ -221,7 +262,7 @@ class BaseAdapter(ABC):
 
         try:
             result = await self._execute(cmd, config)
-            records = self.parse_output(result.stdout, output_file)
+            records, parse_errors = self.parse_output(result.stdout, output_file)
 
             # Post-filter
             filtered_count = 0
@@ -237,6 +278,7 @@ class BaseAdapter(ABC):
                 duration_seconds=result.duration,
                 records=records,
                 filtered_count=filtered_count,
+                parse_errors=parse_errors,
                 timed_out=result.timed_out,
             )
         finally:

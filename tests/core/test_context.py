@@ -2,7 +2,7 @@
 
 import json
 
-from boba.core.models import Hunt, HuntStatus, ScopeConfig, ToolResult
+from boba.core.models import Hunt, HuntStatus, ToolResult
 
 
 class TestHuntCRUD:

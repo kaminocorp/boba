@@ -24,7 +24,11 @@ class WhatwebAdapter(BaseAdapter):
     def build_command(
         self, targets: list[str], config: AdapterConfig
     ) -> tuple[list[str], Path]:
-        output_file = Path(tempfile.mktemp(suffix=".json", prefix="boba_whatweb_"))
+        tf = tempfile.NamedTemporaryFile(
+            suffix=".json", prefix="boba_whatweb_", delete=False
+        )
+        tf.close()
+        output_file = Path(tf.name)
         input_file = self._create_temp_file(targets)
         cmd = [
             str(self._binary_path),

@@ -44,7 +44,11 @@ class FfufAdapter(BaseAdapter):
         if "FUZZ" not in url:
             url = url.rstrip("/") + "/FUZZ"
 
-        output_file = Path(tempfile.mktemp(suffix=".json", prefix="boba_ffuf_"))
+        tf = tempfile.NamedTemporaryFile(
+            suffix=".json", prefix="boba_ffuf_", delete=False
+        )
+        tf.close()
+        output_file = Path(tf.name)
 
         wordlist = config.extra_args_dict.get("wordlist") or _find_default_wordlist()
         if not wordlist:

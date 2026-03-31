@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 from boba.core.errors import BrowserError
 from boba.core.models import BrowserConfig, DOMExtraction, PageInfo, SessionState
 from boba.interaction.history import HttpHistorySink
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserManager:
@@ -48,14 +51,21 @@ class BrowserManager:
         self._browser = await self._playwright.chromium.launch(**launch_kwargs)
 
     async def stop(self) -> None:
-        """Close all contexts, browser, Playwright."""
+        """Close all pages, contexts, browser, Playwright."""
+        # Close pages before their parent contexts to avoid dangling handlers
+        for name in list(self._pages.keys()):
+            try:
+                await self._pages[name].close()
+            except Exception as exc:
+                logger.debug("Error closing page %s: %s", name, exc)
+        self._pages.clear()
+
         for name in list(self._contexts.keys()):
             try:
                 await self._contexts[name].close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Error closing browser context %s: %s", name, exc)
         self._contexts.clear()
-        self._pages.clear()
         self._request_counts.clear()
 
         if self._browser:
@@ -64,6 +74,13 @@ class BrowserManager:
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
+
+    async def __aenter__(self) -> BrowserManager:
+        await self.start()
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.stop()
 
     async def get_or_create_context(
         self,
@@ -90,16 +107,19 @@ class BrowserManager:
             ctx_kwargs["storage_state"] = storage_state
 
         context = await self._browser.new_context(**ctx_kwargs)
+        try:
+            if cookies:
+                await context.add_cookies(cookies)
 
-        if cookies:
-            await context.add_cookies(cookies)
+            # Create a page for this context
+            page = await context.new_page()
+            await self._setup_interception(page, name)
+        except Exception:
+            await context.close()
+            raise
 
         self._contexts[name] = context
         self._request_counts[name] = 0
-
-        # Create a page for this context
-        page = await context.new_page()
-        await self._setup_interception(page, name)
         self._pages[name] = page
 
         return context
@@ -110,17 +130,20 @@ class BrowserManager:
         async def _on_response(response: Any) -> None:
             try:
                 body = await response.body()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not read response body for %s: %s", response.url, exc)
                 body = None
 
             try:
                 req_headers = await response.request.all_headers()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not read request headers for %s: %s", response.url, exc)
                 req_headers = {}
 
             try:
                 resp_headers = await response.all_headers()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not read response headers for %s: %s", response.url, exc)
                 resp_headers = {}
 
             self._sink.record(

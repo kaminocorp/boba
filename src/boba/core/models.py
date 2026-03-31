@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 
@@ -127,6 +126,7 @@ class ToolResult:
     duration_seconds: float
     records: list[dict[str, Any]]
     filtered_count: int = 0
+    parse_errors: int = 0
     timed_out: bool = False
 
 
@@ -139,6 +139,7 @@ class SubprocessResult:
     exit_code: int
     duration: float
     timed_out: bool
+    output_truncated: bool = False
 
 
 # ──────────────────────────── V2: Interaction ─────────────────────────

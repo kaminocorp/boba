@@ -27,6 +27,9 @@ def format_output(
         columns: Which keys to show as table columns (auto-detected if None).
         title: Optional table title.
     """
+    if fmt not in ("json", "table"):
+        console.print(f"[red]Error: invalid format '{fmt}', must be 'json' or 'table'[/red]")
+        fmt = "table"
     if fmt == "json":
         _print_json(data)
     else:

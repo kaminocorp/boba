@@ -17,13 +17,41 @@ FUZZ_MARKER = "§"
 
 
 class HttpClient:
-    """Stateless HTTP client for crafted requests.
+    """HTTP client for crafted requests with connection pooling.
 
     Every request/response is persisted to http_history via the sink.
+    Maintains a persistent httpx.AsyncClient for connection reuse across
+    requests (keep-alive, TCP pooling). Use as an async context manager
+    or call close() when done.
     """
 
-    def __init__(self, sink: HttpHistorySink):
+    def __init__(
+        self,
+        sink: HttpHistorySink,
+        verify_ssl: bool = False,
+        timeout_seconds: float = 30.0,
+        proxy: str | None = None,
+    ):
         self._sink = sink
+        transport_kwargs: dict[str, Any] = {}
+        if proxy:
+            transport_kwargs["proxy"] = proxy
+        self._client = httpx.AsyncClient(
+            verify=verify_ssl,
+            follow_redirects=True,
+            timeout=timeout_seconds,
+            **transport_kwargs,
+        )
+
+    async def close(self) -> None:
+        """Close the underlying connection pool."""
+        await self._client.aclose()
+
+    async def __aenter__(self) -> HttpClient:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.close()
 
     async def request(
         self,
@@ -45,28 +73,19 @@ class HttpClient:
         start = time.monotonic()
         redirect_chain: list[str] = []
 
-        transport_kwargs: dict[str, Any] = {}
-        if proxy:
-            transport_kwargs["proxy"] = proxy
-
-        async with httpx.AsyncClient(
-            verify=verify_ssl,
+        content = body.encode("utf-8") if isinstance(body, str) else body
+        resp = await self._client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            content=content,
+            cookies=cookies,
             follow_redirects=follow_redirects,
-            timeout=timeout_seconds,
-            **transport_kwargs,
-        ) as client:
-            content = body.encode("utf-8") if isinstance(body, str) else body
-            resp = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                content=content,
-                cookies=cookies,
-            )
+        )
 
-            # Track redirect chain
-            if resp.history:
-                redirect_chain = [str(r.url) for r in resp.history]
+        # Track redirect chain
+        if resp.history:
+            redirect_chain = [str(r.url) for r in resp.history]
 
         elapsed_ms = (time.monotonic() - start) * 1000
         resp_headers = dict(resp.headers)
@@ -92,7 +111,7 @@ class HttpClient:
             status_code=resp.status_code,
             headers=resp_headers,
             body=resp_body,
-            body_text=resp.text[:8192] if resp.text else "",
+            body_text=resp.text if resp.text else "",
             elapsed_ms=elapsed_ms,
             redirect_chain=redirect_chain,
         )

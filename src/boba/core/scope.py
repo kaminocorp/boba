@@ -43,14 +43,24 @@ class ScopeEngine:
 
         for rule in self._config.rules:
             if rule.rule_type == ScopeRuleType.DOMAIN:
-                compiled = self._domain_to_regex(rule.pattern)
+                try:
+                    compiled = self._domain_to_regex(rule.pattern)
+                except re.error as e:
+                    raise ValueError(
+                        f"Invalid domain scope pattern '{rule.pattern}': {e}"
+                    ) from e
                 if rule.action == ScopeAction.INCLUDE:
                     self._domain_includes.append(compiled)
                 else:
                     self._domain_excludes.append(compiled)
 
             elif rule.rule_type == ScopeRuleType.IP_RANGE:
-                network = ipaddress.ip_network(rule.pattern, strict=False)
+                try:
+                    network = ipaddress.ip_network(rule.pattern, strict=False)
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid IP range scope pattern '{rule.pattern}': {e}"
+                    ) from e
                 if rule.action == ScopeAction.INCLUDE:
                     self._ip_includes.append(network)
                 else:
@@ -127,7 +137,7 @@ class ScopeEngine:
 
     def _check_ip(self, ip_str: str) -> bool:
         try:
-            addr = ipaddress.ip_address(ip_str.split(":")[0])
+            addr = ipaddress.ip_address(self._strip_port(ip_str))
         except ValueError:
             return False
         for network in self._ip_excludes:
@@ -149,11 +159,34 @@ class ScopeEngine:
         return None
 
     @staticmethod
+    def _strip_port(target: str) -> str:
+        """Strip port from IP address string, handling both IPv4 and IPv6.
+
+        Examples: '10.0.0.1:8080' → '10.0.0.1', '[::1]:443' → '::1', '::1' → '::1'
+        """
+        # Bracketed IPv6: [::1]:port or [::1]
+        if target.startswith("["):
+            bracket_end = target.find("]")
+            if bracket_end != -1:
+                return target[1:bracket_end]
+        # IPv4 with port: exactly one colon
+        if target.count(":") == 1:
+            return target.split(":")[0]
+        # Bare IPv6 or bare IPv4 — return as-is
+        return target
+
+    @staticmethod
     def _extract_hostname(target: str) -> str:
         """Extract hostname from various formats."""
         if "://" in target:
             return urlparse(target).hostname or target
-        if ":" in target:
+        # Bracketed IPv6 with port: [::1]:8080
+        if target.startswith("["):
+            bracket_end = target.find("]")
+            if bracket_end != -1:
+                return target[1:bracket_end]
+        # IPv4 with port — exactly one colon means host:port
+        if target.count(":") == 1:
             return target.split(":")[0]
         return target
 
@@ -161,8 +194,16 @@ class ScopeEngine:
     def _guess_entity_type(target: str) -> str:
         if "://" in target or "/" in target:
             return "url"
+        # Strip brackets/port before attempting IP parse
+        cleaned = target
+        if cleaned.startswith("["):
+            bracket_end = cleaned.find("]")
+            if bracket_end != -1:
+                cleaned = cleaned[1:bracket_end]
+        elif cleaned.count(":") == 1:
+            cleaned = cleaned.split(":")[0]
         try:
-            ipaddress.ip_address(target.split(":")[0])
+            ipaddress.ip_address(cleaned)
             return "ip"
         except ValueError:
             return "subdomain"

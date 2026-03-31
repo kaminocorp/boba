@@ -109,7 +109,7 @@ def hunt_status(
 
 @hunt_app.command("pause")
 def hunt_pause(
-    hunt_id: Annotated[str, typer.Argument()],
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     data_dir: DataDirOption = None,
 ) -> None:
     """Pause a hunt."""
@@ -126,7 +126,7 @@ def hunt_pause(
 
 @hunt_app.command("resume")
 def hunt_resume(
-    hunt_id: Annotated[str, typer.Argument()],
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     data_dir: DataDirOption = None,
 ) -> None:
     """Resume a paused hunt."""
@@ -143,7 +143,7 @@ def hunt_resume(
 
 @hunt_app.command("close")
 def hunt_close(
-    hunt_id: Annotated[str, typer.Argument()],
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     data_dir: DataDirOption = None,
 ) -> None:
     """Close/complete a hunt."""
@@ -210,7 +210,7 @@ def recon_hosts(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = targets.split(",") if targets else None
+        target_list = [t.strip() for t in targets.split(",")] if targets else None
         result = asyncio.run(recon.hosts(manager.context, hunt, target_list))
         if fmt == "json":
             format_output(
@@ -244,7 +244,7 @@ def recon_ports(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = targets.split(",") if targets else None
+        target_list = [t.strip() for t in targets.split(",")] if targets else None
         result = asyncio.run(recon.ports(manager.context, hunt, target_list, range_))
         if fmt == "json":
             format_output(
@@ -306,7 +306,7 @@ def recon_tech(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = targets.split(",") if targets else None
+        target_list = [t.strip() for t in targets.split(",")] if targets else None
         result = asyncio.run(recon.tech(manager.context, hunt, target_list))
         if fmt == "json":
             format_output(
@@ -353,7 +353,7 @@ def enum_directories(
         from boba.tools import enum
 
         hunt = manager.get(hunt_id)
-        ext_list = extensions.split(",") if extensions else None
+        ext_list = [e.strip() for e in extensions.split(",")] if extensions else None
         result = asyncio.run(
             enum.directories(manager.context, hunt, url, wordlist, match_codes, ext_list)
         )
@@ -542,7 +542,7 @@ def browser_navigate(
         from boba.interaction.browser import BrowserManager
         from boba.interaction.history import HttpHistorySink
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         config = BrowserConfig(headless=True)
         browser = BrowserManager(config, sink)
@@ -585,7 +585,7 @@ def browser_screenshot(
         from boba.interaction.browser import BrowserManager
         from boba.interaction.history import HttpHistorySink
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         config = BrowserConfig(headless=True)
         browser = BrowserManager(config, sink)
@@ -622,7 +622,7 @@ def browser_extract(
         from boba.interaction.history import HttpHistorySink
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         config = BrowserConfig(headless=True)
         browser = BrowserManager(config, sink)
@@ -653,8 +653,8 @@ app.add_typer(http_app, name="http")
 @http_app.command("request")
 def http_request(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
     method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "GET",
-    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")] = "",
     header: Annotated[Optional[list[str]], typer.Option("--header", "-H", help="Header (KEY:VALUE)")] = None,
     body: Annotated[Optional[str], typer.Option("--body", "-b", help="Request body")] = None,
     fmt: FormatOption = "json",
@@ -666,7 +666,7 @@ def http_request(
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -710,7 +710,7 @@ def http_replay(
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -756,7 +756,7 @@ def http_compare(
         from boba.interaction.http import HttpClient
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -790,7 +790,7 @@ def session_create(
         from boba.core.models import AuthMethod
         from boba.interaction.session import SessionManager
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         mgr = SessionManager(manager.context, hunt_id)
         state = mgr.create(name, target, AuthMethod(method))
         if fmt == "json":
@@ -817,7 +817,7 @@ def session_login_token(
     try:
         from boba.interaction.session import SessionManager
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         mgr = SessionManager(manager.context, hunt_id)
         mgr.login_bearer(name, token)
         print_success(f"Bearer token set on session '{name}'")
@@ -839,7 +839,7 @@ def session_list(
     try:
         from boba.interaction.session import SessionManager
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         mgr = SessionManager(manager.context, hunt_id)
         sessions = mgr.list_sessions()
         records = [
@@ -866,7 +866,7 @@ def session_delete(
     try:
         from boba.interaction.session import SessionManager
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         mgr = SessionManager(manager.context, hunt_id)
         mgr.delete(name)
         print_success(f"Session '{name}' deleted")
@@ -899,7 +899,7 @@ def scan_nuclei(
         from boba.tools import scan
 
         hunt = manager.get(hunt_id)
-        target_list = targets.split(",") if targets else None
+        target_list = [t.strip() for t in targets.split(",")] if targets else None
         result = asyncio.run(scan.nuclei_scan(
             manager.context, hunt, target_list, severity, tags, templates,
         ))
@@ -946,7 +946,7 @@ def test_idor_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
         sess_mgr = SessionManager(manager.context, hunt_id)
@@ -984,7 +984,7 @@ def test_ssrf_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -1017,7 +1017,7 @@ def test_xss_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -1049,7 +1049,7 @@ def test_sqli_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
@@ -1080,7 +1080,7 @@ def test_auth_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        hunt = manager.get(hunt_id)
+        manager.get(hunt_id)
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 

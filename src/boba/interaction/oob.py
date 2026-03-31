@@ -47,6 +47,13 @@ class OOBManager:
         self._client = None
         self._listeners.clear()
 
+    async def __aenter__(self) -> OOBManager:
+        await self.start()
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.stop()
+
     async def create_listener(
         self,
         purpose: str,
@@ -118,9 +125,10 @@ class OOBManager:
                             "raw_request": interaction.get("raw-request", ""),
                             "full_id": interaction.get("full-id", ""),
                         }
-                        # Match to listener
+                        # Match to listener — use startswith since Interactsh
+                        # prefixes the full interaction ID with the listener ID
                         for lid, info in self._listeners.items():
-                            if lid in entry.get("full_id", ""):
+                            if entry.get("full_id", "").startswith(lid):
                                 entry["listener_id"] = lid
                                 entry["purpose"] = info["purpose"]
                                 entry["target_url"] = info["target_url"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -109,10 +110,8 @@ class HttpHistorySink:
 
         # Store in file, keep truncated preview inline
         body_dir = self._get_body_dir()
-        # Use a counter based on file count to avoid collisions
-        existing = list(body_dir.glob(f"{prefix}_*.bin"))
-        idx = len(existing)
-        file_path = body_dir / f"{prefix}_{idx:06d}.bin"
+        body_dir.mkdir(parents=True, exist_ok=True)
+        file_path = body_dir / f"{prefix}_{uuid.uuid4().hex[:12]}.bin"
         file_path.write_bytes(body_bytes)
 
         preview = body_bytes[:BODY_PREVIEW_LIMIT].decode("utf-8", errors="replace")
