@@ -302,17 +302,17 @@ class HuntContext:
         scope_json = json.dumps(
             {"rules": [{"pattern": r.pattern, "type": r.rule_type.value, "action": r.action.value} for r in hunt.scope.rules]}
         )
-        self._conn.execute(
-            "INSERT INTO hunts (id, name, status, scope_json, config_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (hunt.id, hunt.name, hunt.status.value, scope_json, json.dumps(hunt.config), now, now),
-        )
-        for rule in hunt.scope.rules:
+        with self._conn:
             self._conn.execute(
-                "INSERT OR IGNORE INTO scope_rules (hunt_id, pattern, rule_type, action) VALUES (?, ?, ?, ?)",
-                (hunt.id, rule.pattern, rule.rule_type.value, rule.action.value),
+                "INSERT INTO hunts (id, name, status, scope_json, config_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (hunt.id, hunt.name, hunt.status.value, scope_json, json.dumps(hunt.config), now, now),
             )
-        self._conn.commit()
+            for rule in hunt.scope.rules:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO scope_rules (hunt_id, pattern, rule_type, action) VALUES (?, ?, ?, ?)",
+                    (hunt.id, rule.pattern, rule.rule_type.value, rule.action.value),
+                )
         return hunt.id
 
     def get_hunt(self, hunt_id: str) -> Hunt:
@@ -639,8 +639,6 @@ class HuntContext:
     def get_hunt_stats(self, hunt_id: str) -> dict[str, int]:
         stats = {}
         for table in sorted(self._STATS_TABLES):
-            if table not in self._STATS_TABLES:
-                continue  # defensive — only query known tables
             row = self._conn.execute(
                 f"SELECT COUNT(*) as cnt FROM {table} WHERE hunt_id = ?", (hunt_id,)  # noqa: S608
             ).fetchone()

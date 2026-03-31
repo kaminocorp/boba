@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.6](#026--final-review--pre-v3-readiness) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
 - [0.2.5](#025--pre-v3-quality-gate) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
 - [0.2.4](#024--operational-robustness) — Persistent HTTP client, body_text truncation fix, diagnostic logging, SQLi baseline fix
 - [0.2.3](#023--data-integrity--resource-safety) — Technology commit fix, broader parse error handling, HuntContext context manager, lint cleanup, gather partial results
@@ -7,6 +8,33 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.6 — Final Review & Pre-V3 Readiness
+
+**Date:** 2026-03-31
+**Scope:** 14 files modified, 116 tests passing (1 new, 0 regressions)
+**Details:** [v1v2-final-review.md](completions/v1v2-final-review.md)
+
+Comprehensive 5-agent parallel codebase review for V3-readiness. Fixed 7 correctness bugs, 7 robustness issues, and 2 code quality fixes that survived all prior hardening rounds.
+
+- **Per-request timeout now works in HttpClient** — `timeout_seconds` parameter was accepted but never passed to httpx; also removed misleading unused `verify_ssl`/`proxy` params from `request()`
+- **Time-based SQL injection detection implemented** — completes the 4-method SQLi detection documented in the docstring; uses SLEEP payloads with 3s delay threshold over baseline
+- **XSS partial reflection now flags as vulnerable** — inner payload content reflected without tags is reported with POSSIBLE confidence instead of silently discarded
+- **JWT exception handler narrowed** — `except (ValueError, Exception)` replaced with specific `(ValueError, KeyError, IndexError)` to stop masking real errors
+- **IDOR object enumeration always runs** — no longer gated on prior `vulnerable=True`; provided test IDs are always tested and can upgrade confidence
+- **SQLi boolean threshold includes boundary** — `> 20` → `>= 20` bytes; `> 0.05` → `>= 0.05` relative
+- **Scope post-filter handles empty-string targets** — `""` targets no longer bypass scope checking via Python truthiness
+- **`create_hunt()` is now transactional** — hunt + scope_rules wrapped in `with self._conn:`; prevents partial state
+- **OOB poll loop logs exceptions** — `except Exception: pass` replaced with debug logging
+- **Browser `fill_form` has timeout** — `wait_for_load_state("networkidle")` no longer hangs indefinitely
+- **CLI finally blocks can't mask exceptions** — 41 locations now use `_safe_close()` helper
+- **Invalid `--format` exits with error** — no longer silently falls back to table output
+- **HttpHistorySink gracefully handles file I/O errors** — falls back to truncated inline storage
+- **DOM XSS evidence includes URL** — adds traceability for browser-based detection
+- **Dead code removed** from `get_hunt_stats()`
+- **Duplicate XSS payload removed** from polyglots list
 
 ---
 

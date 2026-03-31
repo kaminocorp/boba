@@ -308,6 +308,7 @@ class BrowserManager:
         values: dict[str, str],
         context_name: str = "default",
         submit: bool = False,
+        timeout_ms: float = 30_000,
     ) -> None:
         """Fill form fields and optionally submit."""
         page = await self._get_page(context_name)
@@ -315,7 +316,7 @@ class BrowserManager:
             await page.fill(f"{selector} [name='{field_name}']", value)
         if submit:
             await page.click(f"{selector} [type='submit']")
-            await page.wait_for_load_state("networkidle")
+            await page.wait_for_load_state("networkidle", timeout=timeout_ms)
 
     async def click(self, selector: str, context_name: str = "default") -> None:
         """Click an element."""

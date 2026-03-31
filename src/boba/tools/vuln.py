@@ -119,8 +119,9 @@ async def test_idor(
         "body_length_unauth": len(resp_unauth.body),
     })
 
-    # Test additional object IDs if provided
-    if object_ids and vulnerable:
+    # Test additional object IDs if provided (run regardless of confidence
+    # to gather enumeration evidence that can upgrade a POSSIBLE to CONFIRMED)
+    if object_ids:
         for obj_id in object_ids:
             # Replace the last path segment with the new object ID
             parsed_ep = urlparse(endpoint)
@@ -136,6 +137,12 @@ async def test_idor(
             request_ids.append(resp.request_id)
             if 200 <= resp.status_code < 400:
                 evidence.append({"enumerated_id": obj_id, "status": resp.status_code})
+                if not vulnerable:
+                    vulnerable = True
+                    confidence = Confidence.LIKELY
+                    description = (
+                        f"User B ({session_b.name}) can enumerate object IDs on {endpoint}."
+                    )
 
     return VulnTestResult(
         test_type="idor",
@@ -324,6 +331,7 @@ async def test_xss(
             # e.g. "<script>alert(1)</script>" → check for "alert(1)"
             inner = re.sub(r"<[^>]*>", "", payload).strip()
             if inner and len(inner) >= 8 and inner in resp.body_text:
+                vulnerable = True
                 confidence = Confidence.POSSIBLE
                 evidence.append({
                     "type": "partial_reflection",
@@ -350,6 +358,7 @@ async def test_xss(
                         "type": "dom_based",
                         "payload": canary,
                         "param": param_name,
+                        "url": test_url,
                     })
                     break
             if vulnerable:
@@ -381,7 +390,7 @@ async def test_sqli(
     1. Baseline: normal request
     2. Error-based: inject ' " ) → check for SQL error strings
     3. Boolean-based: true vs false conditions → compare response lengths
-    4. Time-based: SLEEP payloads → check response time delta
+    4. Time-based: SLEEP payloads → check response time delta (≥3s over baseline)
     """
     payloads = payloads or sqli_payloads.ERROR_BASED
     request_ids: list[int] = []
@@ -459,7 +468,7 @@ async def test_sqli(
         relative_diff = len_diff / baseline_len
         if (
             resp_true.status_code == resp_false.status_code
-            and (len_diff > 20 or relative_diff > 0.05)
+            and (len_diff >= 20 or relative_diff >= 0.05)
             and len_diff > 0
             and resp_true.status_code == resp_baseline.status_code
         ):
@@ -472,6 +481,40 @@ async def test_sqli(
                 "false_length": len(resp_false.body),
                 "diff": len_diff,
             })
+
+        # Time-based detection — only if not already confirmed via error/boolean
+        if not vulnerable:
+            time_payloads = (
+                sqli_payloads.TIME_BASED_MYSQL
+                + sqli_payloads.TIME_BASED_POSTGRES
+                + sqli_payloads.TIME_BASED_MSSQL
+                + sqli_payloads.TIME_BASED_SQLITE
+            )
+            baseline_time = resp_baseline.elapsed_ms
+            for payload in time_payloads:
+                test_url = _inject_param(url, param_name, f"{default_val}{payload}")
+                resp_time = await http_client.request(
+                    method=method, url=test_url,
+                    headers=headers, cookies=cookies,
+                    source="test_sqli", tags=["sqli", "time_based"],
+                    timeout_seconds=15.0,
+                )
+                request_ids.append(resp_time.request_id)
+                # A SLEEP(5) payload should add ≥3s over baseline
+                delay_ms = resp_time.elapsed_ms - baseline_time
+                if delay_ms >= 3000:
+                    vulnerable = True
+                    confidence = Confidence.LIKELY
+                    evidence.append({
+                        "type": "time_based",
+                        "payload": payload,
+                        "param": param_name,
+                        "baseline_ms": baseline_time,
+                        "response_ms": resp_time.elapsed_ms,
+                        "delay_ms": delay_ms,
+                        "request_id": resp_time.request_id,
+                    })
+                    break
 
     return VulnTestResult(
         test_type="sqli",
@@ -560,7 +603,7 @@ async def test_auth(
                     })
                     break
 
-        except (ValueError, Exception):
+        except (ValueError, KeyError, IndexError):
             # Invalid JWT format — skip JWT tests
             pass
 

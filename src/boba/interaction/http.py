@@ -61,27 +61,32 @@ class HttpClient:
         body: str | bytes | None = None,
         cookies: dict[str, str] | None = None,
         follow_redirects: bool = True,
-        timeout_seconds: float = 30.0,
-        verify_ssl: bool = False,
-        proxy: str | None = None,
+        timeout_seconds: float | None = None,
         source: str = "http_client",
         session_name: str | None = None,
         parent_request_id: int | None = None,
         tags: list[str] | None = None,
     ) -> HttpResponse:
-        """Send an HTTP request and persist to history."""
+        """Send an HTTP request and persist to history.
+
+        timeout_seconds overrides the client-level default for this request.
+        Pass None to use the client default.
+        """
         start = time.monotonic()
         redirect_chain: list[str] = []
 
         content = body.encode("utf-8") if isinstance(body, str) else body
-        resp = await self._client.request(
-            method=method,
-            url=url,
-            headers=headers,
-            content=content,
-            cookies=cookies,
-            follow_redirects=follow_redirects,
-        )
+        req_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "content": content,
+            "cookies": cookies,
+            "follow_redirects": follow_redirects,
+        }
+        if timeout_seconds is not None:
+            req_kwargs["timeout"] = timeout_seconds
+        resp = await self._client.request(**req_kwargs)
 
         # Track redirect chain
         if resp.history:

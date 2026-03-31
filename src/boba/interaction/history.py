@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 
 from boba.core.config import get_bodies_dir
 from boba.core.context import HuntContext
+
+logger = logging.getLogger(__name__)
 
 # Bodies larger than this are stored as files, with a truncated preview inline.
 BODY_INLINE_LIMIT = 64 * 1024  # 64 KB
@@ -109,13 +112,16 @@ class HttpHistorySink:
             return body_bytes.decode("utf-8", errors="replace"), None
 
         # Store in file, keep truncated preview inline
-        body_dir = self._get_body_dir()
-        body_dir.mkdir(parents=True, exist_ok=True)
-        file_path = body_dir / f"{prefix}_{uuid.uuid4().hex[:12]}.bin"
-        file_path.write_bytes(body_bytes)
-
         preview = body_bytes[:BODY_PREVIEW_LIMIT].decode("utf-8", errors="replace")
-        return preview, str(file_path)
+        try:
+            body_dir = self._get_body_dir()
+            body_dir.mkdir(parents=True, exist_ok=True)
+            file_path = body_dir / f"{prefix}_{uuid.uuid4().hex[:12]}.bin"
+            file_path.write_bytes(body_bytes)
+            return preview, str(file_path)
+        except OSError as exc:
+            logger.warning("Failed to write body file, storing truncated inline: %s", exc)
+            return preview, None
 
     # ── Read ──
 

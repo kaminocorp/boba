@@ -119,10 +119,10 @@ class BaseAdapter(ABC):
         removed = 0
         for record in records:
             target_value = self.extract_scope_target(record)
-            if target_value and self._scope.is_in_scope(target_value):
+            if target_value is None:
+                kept.append(record)  # can't determine scope target, keep it
+            elif target_value and self._scope.is_in_scope(target_value):
                 kept.append(record)
-            elif target_value is None:
-                kept.append(record)  # can't check scope, keep it
             else:
                 removed += 1
         return kept, removed

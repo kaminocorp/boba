@@ -29,7 +29,7 @@ def format_output(
     """
     if fmt not in ("json", "table"):
         console.print(f"[red]Error: invalid format '{fmt}', must be 'json' or 'table'[/red]")
-        fmt = "table"
+        raise SystemExit(1)
     if fmt == "json":
         _print_json(data)
     else:

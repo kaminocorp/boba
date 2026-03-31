@@ -191,8 +191,8 @@ class TestXSS:
         assert result.evidence[0]["type"] == "reflected"
 
     @pytest.mark.asyncio
-    async def test_xss_not_vulnerable(self, sink):
-        """Payload escaped in response → no XSS."""
+    async def test_xss_partial_reflection(self, sink):
+        """Payload inner content reflected but tags escaped → POSSIBLE XSS."""
         client = HttpClient(sink)
         call_count = 0
 
@@ -200,6 +200,28 @@ class TestXSS:
             nonlocal call_count
             call_count += 1
             return _make_response(200, "<p>Search: &lt;script&gt;alert(1)&lt;/script&gt;</p>", call_count)
+
+        client.request = mock_request
+        result = await vuln.test_xss(
+            client,
+            url="https://app.example.com/search",
+            params={"q": "test"},
+            payloads=["<script>alert(1)</script>"],
+        )
+        assert result.vulnerable is True
+        assert result.confidence == Confidence.POSSIBLE
+        assert result.evidence[0]["type"] == "partial_reflection"
+
+    @pytest.mark.asyncio
+    async def test_xss_not_vulnerable(self, sink):
+        """Payload fully stripped from response → no XSS."""
+        client = HttpClient(sink)
+        call_count = 0
+
+        async def mock_request(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _make_response(200, "<p>Search: no results found</p>", call_count)
 
         client.request = mock_request
         result = await vuln.test_xss(

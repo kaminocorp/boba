@@ -34,6 +34,14 @@ def _get_manager(data_dir: Path | None = None):
     return HuntManager(db_path=db_path)
 
 
+def _safe_close(manager) -> None:
+    """Close manager context without masking the original exception."""
+    try:
+        _safe_close(manager)
+    except Exception:
+        pass
+
+
 # ═══════════════════ HUNT COMMANDS ═══════════════════
 
 hunt_app = typer.Typer(help="Hunt lifecycle management.")
@@ -63,7 +71,7 @@ def hunt_create(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @hunt_app.command("list")
@@ -78,7 +86,7 @@ def hunt_list(fmt: FormatOption = "table", data_dir: DataDirOption = None) -> No
         ]
         format_output(records, fmt=fmt, title="Hunts")
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @hunt_app.command("status")
@@ -104,7 +112,7 @@ def hunt_status(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @hunt_app.command("pause")
@@ -121,7 +129,7 @@ def hunt_pause(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @hunt_app.command("resume")
@@ -138,7 +146,7 @@ def hunt_resume(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @hunt_app.command("close")
@@ -155,7 +163,7 @@ def hunt_close(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ RECON COMMANDS ═══════════════════
@@ -194,7 +202,7 @@ def recon_subdomains(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @recon_app.command("hosts")
@@ -227,7 +235,7 @@ def recon_hosts(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @recon_app.command("ports")
@@ -257,7 +265,7 @@ def recon_ports(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @recon_app.command("urls")
@@ -290,7 +298,7 @@ def recon_urls(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @recon_app.command("tech")
@@ -328,7 +336,7 @@ def recon_tech(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ ENUM COMMANDS ═══════════════════
@@ -372,7 +380,7 @@ def enum_directories(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ CONTEXT COMMANDS ═══════════════════
@@ -393,7 +401,7 @@ def ctx_subdomains(
         records = manager.context.get_subdomains(hunt_id)
         format_output(records, fmt=fmt, title="Subdomains")
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("hosts")
@@ -413,7 +421,7 @@ def ctx_hosts(
             title="Hosts",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("ports")
@@ -429,7 +437,7 @@ def ctx_ports(
         records = manager.context.get_ports(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Ports")
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("urls")
@@ -447,7 +455,7 @@ def ctx_urls(
             records, fmt=fmt, columns=["url", "method", "status_code", "sources"], title="URLs"
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("tech")
@@ -463,7 +471,7 @@ def ctx_tech(
         records = manager.context.get_technologies(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Technologies")
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("directories")
@@ -483,7 +491,7 @@ def ctx_directories(
             title="Directories",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("runs")
@@ -502,7 +510,7 @@ def ctx_runs(
             title="Tool Runs",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("stats")
@@ -517,7 +525,7 @@ def ctx_stats(
         stats = manager.stats(hunt_id)
         format_output(stats, fmt=fmt, title="Hunt Statistics")
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ BROWSER COMMANDS ═══════════════════
@@ -567,7 +575,7 @@ def browser_navigate(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @browser_app.command("screenshot")
@@ -604,7 +612,7 @@ def browser_screenshot(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @browser_app.command("extract")
@@ -641,7 +649,7 @@ def browser_extract(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ HTTP COMMANDS ═══════════════════
@@ -692,7 +700,7 @@ def http_request(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @http_app.command("replay")
@@ -738,7 +746,7 @@ def http_replay(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @http_app.command("compare")
@@ -766,7 +774,7 @@ def http_compare(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ SESSION COMMANDS ═══════════════════
@@ -802,7 +810,7 @@ def session_create(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @session_app.command("login-token")
@@ -825,7 +833,7 @@ def session_login_token(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @session_app.command("list")
@@ -852,7 +860,7 @@ def session_list(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @session_app.command("delete")
@@ -874,7 +882,7 @@ def session_delete(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ SCAN COMMANDS ═══════════════════
@@ -918,7 +926,7 @@ def scan_nuclei(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ TEST COMMANDS ═══════════════════
@@ -964,7 +972,7 @@ def test_idor_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @test_app.command("ssrf")
@@ -997,7 +1005,7 @@ def test_ssrf_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @test_app.command("xss")
@@ -1029,7 +1037,7 @@ def test_xss_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @test_app.command("sqli")
@@ -1061,7 +1069,7 @@ def test_sqli_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @test_app.command("auth")
@@ -1090,7 +1098,7 @@ def test_auth_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 # ═══════════════════ CONTEXT EXTENSIONS ═══════════════════
@@ -1128,7 +1136,7 @@ def ctx_http_history(
             title="HTTP History",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("findings")
@@ -1149,7 +1157,7 @@ def ctx_findings(
             title="Findings",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("sessions")
@@ -1168,7 +1176,7 @@ def ctx_sessions(
             title="Sessions",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 @context_app.command("oob")
@@ -1187,7 +1195,7 @@ def ctx_oob(
             title="OOB Listeners",
         )
     finally:
-        manager.close_context()
+        _safe_close(manager)
 
 
 if __name__ == "__main__":

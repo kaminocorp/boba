@@ -149,8 +149,8 @@ class OOBManager:
                     if all_interactions:
                         break
 
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Error polling OOB interactions: %s", exc)
 
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
