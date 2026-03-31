@@ -160,6 +160,112 @@ CREATE INDEX IF NOT EXISTS idx_technologies_hunt  ON technologies(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_directories_hunt   ON directories(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_tool_runs_hunt     ON tool_runs(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_tool_runs_status   ON tool_runs(hunt_id, status);
+
+-- ═══════════════════ V2: Interaction tables ═══════════════════
+
+CREATE TABLE IF NOT EXISTS http_history (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id               TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    session_name          TEXT,
+    tool_run_id           INTEGER REFERENCES tool_runs(id),
+    source                TEXT NOT NULL DEFAULT 'manual',
+
+    method                TEXT NOT NULL,
+    url                   TEXT NOT NULL,
+    host                  TEXT NOT NULL,
+    path                  TEXT NOT NULL DEFAULT '/',
+    query                 TEXT,
+    request_headers       TEXT NOT NULL DEFAULT '{}',
+    request_body          TEXT,
+    request_body_ref      TEXT,
+    content_type          TEXT,
+
+    status_code           INTEGER,
+    response_headers      TEXT DEFAULT '{}',
+    response_body         TEXT,
+    response_body_ref     TEXT,
+    response_length       INTEGER,
+    response_content_type TEXT,
+
+    elapsed_ms            REAL,
+    tls_version           TEXT,
+    ip_address            TEXT,
+    resource_type         TEXT,
+    is_redirect           INTEGER DEFAULT 0,
+    redirect_url          TEXT,
+
+    parent_request_id     INTEGER REFERENCES http_history(id),
+    tags                  TEXT DEFAULT '[]',
+    notes                 TEXT,
+
+    timestamp             TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_http_hist_hunt       ON http_history(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_http_hist_host       ON http_history(hunt_id, host);
+CREATE INDEX IF NOT EXISTS idx_http_hist_status     ON http_history(hunt_id, status_code);
+CREATE INDEX IF NOT EXISTS idx_http_hist_session    ON http_history(hunt_id, session_name);
+CREATE INDEX IF NOT EXISTS idx_http_hist_source     ON http_history(hunt_id, source);
+CREATE INDEX IF NOT EXISTS idx_http_hist_method_url ON http_history(hunt_id, method, url);
+CREATE INDEX IF NOT EXISTS idx_http_hist_timestamp  ON http_history(hunt_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    target_url       TEXT NOT NULL,
+    auth_method      TEXT NOT NULL DEFAULT 'form',
+    cookies_json     TEXT NOT NULL DEFAULT '{}',
+    headers_json     TEXT NOT NULL DEFAULT '{}',
+    tokens_json      TEXT NOT NULL DEFAULT '{}',
+    storage_state    TEXT,
+    is_valid         INTEGER DEFAULT 1,
+    created_at       TEXT NOT NULL,
+    last_used_at     TEXT NOT NULL,
+    UNIQUE(hunt_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS findings (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    finding_type     TEXT NOT NULL,
+    severity         TEXT NOT NULL DEFAULT 'info',
+    title            TEXT NOT NULL,
+    description      TEXT,
+    url              TEXT,
+    endpoint         TEXT,
+    parameter        TEXT NOT NULL DEFAULT '',
+    evidence         TEXT,
+    request_ids      TEXT DEFAULT '[]',
+    tool_run_id      INTEGER REFERENCES tool_runs(id),
+    confirmed        INTEGER DEFAULT 0,
+    false_positive   INTEGER DEFAULT 0,
+    reported         INTEGER DEFAULT 0,
+    template_id      TEXT,
+    tags             TEXT DEFAULT '[]',
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE(hunt_id, finding_type, url, parameter)
+);
+
+CREATE INDEX IF NOT EXISTS idx_findings_hunt     ON findings(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_findings_type     ON findings(hunt_id, finding_type);
+CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(hunt_id, severity);
+
+CREATE TABLE IF NOT EXISTS oob_listeners (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    listener_id      TEXT NOT NULL,
+    callback_domain  TEXT NOT NULL,
+    purpose          TEXT,
+    test_payload     TEXT,
+    target_url       TEXT,
+    parameter        TEXT,
+    interactions     TEXT DEFAULT '[]',
+    created_at       TEXT NOT NULL,
+    expires_at       TEXT,
+    UNIQUE(hunt_id, listener_id)
+);
 """
 
 
@@ -506,7 +612,10 @@ class HuntContext:
 
     def get_hunt_stats(self, hunt_id: str) -> dict[str, int]:
         stats = {}
-        for table in ["subdomains", "hosts", "ports", "urls", "technologies", "directories"]:
+        for table in [
+            "subdomains", "hosts", "ports", "urls", "technologies",
+            "directories", "http_history", "sessions", "findings",
+        ]:
             row = self._conn.execute(
                 f"SELECT COUNT(*) as cnt FROM {table} WHERE hunt_id = ?", (hunt_id,)  # noqa: S608
             ).fetchone()
@@ -518,3 +627,346 @@ class HuntContext:
         ).fetchone()
         stats["hosts_alive"] = row["cnt"] if row else 0
         return stats
+
+    # ═══════════════════ V2: HTTP HISTORY ═══════════════════
+
+    def insert_http_record(self, hunt_id: str, record: dict[str, Any]) -> int:
+        """Insert a single HTTP exchange. Returns the row ID."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO http_history
+                (hunt_id, session_name, tool_run_id, source,
+                 method, url, host, path, query,
+                 request_headers, request_body, request_body_ref, content_type,
+                 status_code, response_headers, response_body, response_body_ref,
+                 response_length, response_content_type,
+                 elapsed_ms, tls_version, ip_address, resource_type,
+                 is_redirect, redirect_url,
+                 parent_request_id, tags, notes, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                hunt_id,
+                record.get("session_name"),
+                record.get("tool_run_id"),
+                record.get("source", "manual"),
+                record["method"],
+                record["url"],
+                record["host"],
+                record.get("path", "/"),
+                record.get("query"),
+                json.dumps(record.get("request_headers", {})),
+                record.get("request_body"),
+                record.get("request_body_ref"),
+                record.get("content_type"),
+                record.get("status_code"),
+                json.dumps(record.get("response_headers", {})),
+                record.get("response_body"),
+                record.get("response_body_ref"),
+                record.get("response_length"),
+                record.get("response_content_type"),
+                record.get("elapsed_ms"),
+                record.get("tls_version"),
+                record.get("ip_address"),
+                record.get("resource_type"),
+                1 if record.get("is_redirect") else 0,
+                record.get("redirect_url"),
+                record.get("parent_request_id"),
+                json.dumps(record.get("tags", [])),
+                record.get("notes"),
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_http_record(self, record_id: int) -> dict[str, Any] | None:
+        """Get a single HTTP history record by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM http_history WHERE id = ?", (record_id,)
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["request_headers"] = json.loads(result["request_headers"] or "{}")
+        result["response_headers"] = json.loads(result["response_headers"] or "{}")
+        result["tags"] = json.loads(result["tags"] or "[]")
+        return result
+
+    def query_http_history(
+        self,
+        hunt_id: str,
+        host: str | None = None,
+        method: str | None = None,
+        status_code: int | None = None,
+        source: str | None = None,
+        session_name: str | None = None,
+        path_prefix: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Query HTTP history with filters."""
+        sql = "SELECT * FROM http_history WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+
+        if host:
+            sql += " AND host = ?"
+            params.append(host)
+        if method:
+            sql += " AND method = ?"
+            params.append(method)
+        if status_code is not None:
+            sql += " AND status_code = ?"
+            params.append(status_code)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        if session_name:
+            sql += " AND session_name = ?"
+            params.append(session_name)
+        if path_prefix:
+            sql += " AND path LIKE ?"
+            params.append(f"{path_prefix}%")
+
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        rows = self._conn.execute(sql, params).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["request_headers"] = json.loads(r["request_headers"] or "{}")
+            r["response_headers"] = json.loads(r["response_headers"] or "{}")
+            r["tags"] = json.loads(r["tags"] or "[]")
+            results.append(r)
+        return results
+
+    def update_http_record_tags(self, record_id: int, tags: list[str]) -> None:
+        """Add tags to an HTTP history record (merges with existing)."""
+        existing = self.get_http_record(record_id)
+        if not existing:
+            return
+        merged = list(set(existing.get("tags", []) + tags))
+        self._conn.execute(
+            "UPDATE http_history SET tags = ? WHERE id = ?",
+            (json.dumps(merged), record_id),
+        )
+        self._conn.commit()
+
+    def update_http_record_notes(self, record_id: int, notes: str) -> None:
+        """Set notes on an HTTP history record."""
+        self._conn.execute(
+            "UPDATE http_history SET notes = ? WHERE id = ?", (notes, record_id)
+        )
+        self._conn.commit()
+
+    # ═══════════════════ V2: SESSIONS ═══════════════════
+
+    def upsert_session(self, hunt_id: str, session: dict[str, Any]) -> None:
+        """Create or update a named session."""
+        now = _now()
+        self._conn.execute(
+            """INSERT INTO sessions
+                (hunt_id, name, target_url, auth_method, cookies_json, headers_json,
+                 tokens_json, storage_state, is_valid, created_at, last_used_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, name) DO UPDATE SET
+                target_url = excluded.target_url,
+                auth_method = excluded.auth_method,
+                cookies_json = excluded.cookies_json,
+                headers_json = excluded.headers_json,
+                tokens_json = excluded.tokens_json,
+                storage_state = excluded.storage_state,
+                is_valid = excluded.is_valid,
+                last_used_at = excluded.last_used_at""",
+            (
+                hunt_id,
+                session["name"],
+                session["target_url"],
+                session.get("auth_method", "form"),
+                json.dumps(session.get("cookies", {})),
+                json.dumps(session.get("headers", {})),
+                json.dumps(session.get("tokens", {})),
+                json.dumps(session["storage_state"]) if session.get("storage_state") else None,
+                1 if session.get("is_valid", True) else 0,
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+
+    def get_session(self, hunt_id: str, name: str) -> dict[str, Any] | None:
+        """Get a named session."""
+        row = self._conn.execute(
+            "SELECT * FROM sessions WHERE hunt_id = ? AND name = ?", (hunt_id, name)
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["cookies"] = json.loads(result.pop("cookies_json", "{}"))
+        result["headers"] = json.loads(result.pop("headers_json", "{}"))
+        result["tokens"] = json.loads(result.pop("tokens_json", "{}"))
+        result["storage_state"] = (
+            json.loads(result["storage_state"]) if result.get("storage_state") else None
+        )
+        result["is_valid"] = bool(result["is_valid"])
+        return result
+
+    def get_sessions(self, hunt_id: str) -> list[dict[str, Any]]:
+        """List all sessions for a hunt."""
+        rows = self._conn.execute(
+            "SELECT * FROM sessions WHERE hunt_id = ? ORDER BY name", (hunt_id,)
+        ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["cookies"] = json.loads(r.pop("cookies_json", "{}"))
+            r["headers"] = json.loads(r.pop("headers_json", "{}"))
+            r["tokens"] = json.loads(r.pop("tokens_json", "{}"))
+            r["storage_state"] = (
+                json.loads(r["storage_state"]) if r.get("storage_state") else None
+            )
+            r["is_valid"] = bool(r["is_valid"])
+            results.append(r)
+        return results
+
+    def delete_session(self, hunt_id: str, name: str) -> None:
+        """Delete a named session."""
+        self._conn.execute(
+            "DELETE FROM sessions WHERE hunt_id = ? AND name = ?", (hunt_id, name)
+        )
+        self._conn.commit()
+
+    def touch_session(self, hunt_id: str, name: str) -> None:
+        """Update last_used_at for a session."""
+        self._conn.execute(
+            "UPDATE sessions SET last_used_at = ? WHERE hunt_id = ? AND name = ?",
+            (_now(), hunt_id, name),
+        )
+        self._conn.commit()
+
+    # ═══════════════════ V2: FINDINGS ═══════════════════
+
+    def upsert_finding(self, hunt_id: str, finding: dict[str, Any]) -> int:
+        """Upsert a vulnerability finding. Returns the row ID."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO findings
+                (hunt_id, finding_type, severity, title, description,
+                 url, endpoint, parameter, evidence, request_ids,
+                 tool_run_id, confirmed, false_positive, reported,
+                 template_id, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, finding_type, url, parameter) DO UPDATE SET
+                severity = excluded.severity,
+                title = excluded.title,
+                description = excluded.description,
+                evidence = excluded.evidence,
+                request_ids = excluded.request_ids,
+                tool_run_id = excluded.tool_run_id,
+                confirmed = excluded.confirmed,
+                template_id = excluded.template_id,
+                tags = excluded.tags,
+                updated_at = excluded.updated_at""",
+            (
+                hunt_id,
+                finding["finding_type"],
+                finding.get("severity", "info"),
+                finding["title"],
+                finding.get("description"),
+                finding.get("url"),
+                finding.get("endpoint"),
+                finding.get("parameter", ""),
+                json.dumps(finding.get("evidence")) if finding.get("evidence") else None,
+                json.dumps(finding.get("request_ids", [])),
+                finding.get("tool_run_id"),
+                1 if finding.get("confirmed") else 0,
+                1 if finding.get("false_positive") else 0,
+                1 if finding.get("reported") else 0,
+                finding.get("template_id"),
+                json.dumps(finding.get("tags", [])),
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_findings(
+        self,
+        hunt_id: str,
+        finding_type: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query findings with optional filters."""
+        sql = "SELECT * FROM findings WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if finding_type:
+            sql += " AND finding_type = ?"
+            params.append(finding_type)
+        if severity:
+            sql += " AND severity = ?"
+            params.append(severity)
+        sql += " ORDER BY created_at DESC"
+        rows = self._conn.execute(sql, params).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["evidence"] = json.loads(r["evidence"]) if r.get("evidence") else None
+            r["request_ids"] = json.loads(r["request_ids"] or "[]")
+            r["tags"] = json.loads(r["tags"] or "[]")
+            r["confirmed"] = bool(r["confirmed"])
+            r["false_positive"] = bool(r["false_positive"])
+            r["reported"] = bool(r["reported"])
+            results.append(r)
+        return results
+
+    # ═══════════════════ V2: OOB LISTENERS ═══════════════════
+
+    def insert_oob_listener(self, hunt_id: str, listener: dict[str, Any]) -> int:
+        """Insert an OOB listener record."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO oob_listeners
+                (hunt_id, listener_id, callback_domain, purpose,
+                 test_payload, target_url, parameter, interactions,
+                 created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, listener_id) DO UPDATE SET
+                interactions = excluded.interactions""",
+            (
+                hunt_id,
+                listener["listener_id"],
+                listener["callback_domain"],
+                listener.get("purpose"),
+                listener.get("test_payload"),
+                listener.get("target_url"),
+                listener.get("parameter"),
+                json.dumps(listener.get("interactions", [])),
+                now,
+                listener.get("expires_at"),
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def update_oob_interactions(
+        self, hunt_id: str, listener_id: str, interactions: list[dict[str, Any]]
+    ) -> None:
+        """Update the interactions list for an OOB listener."""
+        self._conn.execute(
+            "UPDATE oob_listeners SET interactions = ? WHERE hunt_id = ? AND listener_id = ?",
+            (json.dumps(interactions), hunt_id, listener_id),
+        )
+        self._conn.commit()
+
+    def get_oob_listeners(self, hunt_id: str) -> list[dict[str, Any]]:
+        """List all OOB listeners for a hunt."""
+        rows = self._conn.execute(
+            "SELECT * FROM oob_listeners WHERE hunt_id = ? ORDER BY created_at DESC",
+            (hunt_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["interactions"] = json.loads(r["interactions"] or "[]")
+            results.append(r)
+        return results

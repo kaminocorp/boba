@@ -28,3 +28,15 @@ class ScopeViolationError(BobaError):
 
 class HuntNotFoundError(BobaError):
     """Hunt ID does not exist in the context database."""
+
+
+class BrowserError(BobaError):
+    """Error during browser automation (Playwright)."""
+
+
+class SessionError(BobaError):
+    """Error in session management (create, login, apply)."""
+
+
+class OOBError(BobaError):
+    """Error in out-of-band listener management (Interactsh)."""

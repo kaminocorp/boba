@@ -15,6 +15,7 @@ def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
     from boba.adapters.httpx_runner import HttpxRunnerAdapter
     from boba.adapters.katana import KatanaAdapter
     from boba.adapters.naabu import NaabuAdapter
+    from boba.adapters.nuclei import NucleiAdapter
     from boba.adapters.subfinder import SubfinderAdapter
     from boba.adapters.waybackurls import WaybackurlsAdapter
     from boba.adapters.whatweb import WhatwebAdapter
@@ -28,4 +29,5 @@ def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
         "whatweb": WhatwebAdapter,
         "katana": KatanaAdapter,
         "ffuf": FfufAdapter,
+        "nuclei": NucleiAdapter,
     }
