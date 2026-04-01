@@ -42,7 +42,7 @@ TIME_BASED_POSTGRES: list[str] = [
 
 TIME_BASED_MSSQL: list[str] = [
     "'; WAITFOR DELAY '0:0:5'--",
-    "' AND 1=(SELECT 1 FROM (SELECT SLEEP(5))a)--",
+    "' AND 1=1; WAITFOR DELAY '0:0:5'--",
 ]
 
 TIME_BASED_SQLITE: list[str] = [

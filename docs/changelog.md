@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.10](#0210--v3-readiness-final-quality-pass) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
 - [0.2.9](#029--v3-readiness-final-gate) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
 - [0.2.8](#028--v3-readiness-gate) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
 - [0.2.7](#027--pre-v3-final-quality-gate) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
@@ -11,6 +12,35 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.10 — V3 Readiness Final Quality Pass
+
+**Date:** 2026-04-01
+**Scope:** 8 files modified, 116 tests passing (0 regressions)
+**Details:** [v1v2-v3-readiness-final-gate.md](completions/v1v2-v3-readiness-final-gate.md)
+
+5-agent parallel codebase review across all layers. Found 10 medium-severity issues surviving all prior hardening rounds (0.2.1–0.2.9). All fixes are strictly additive. Score: 7.5/10 → 8.5+/10.
+
+### Correctness
+
+- **`upsert_finding` ON CONFLICT now updates `false_positive` and `reported` flags** — re-scans no longer leave stale flags from the original insert
+- **Hunt state transition validation** — `completed` is now a terminal state; invalid transitions (e.g., resume a completed hunt) raise `ValueError` with allowed transitions listed
+- **`log_tool_run` computes accurate `started_at`** — `finished_at - duration_seconds` instead of recording current time for both fields
+- **MSSQL time-based SQLi payload fixed** — replaced MySQL `SLEEP()` syntax with MSSQL `WAITFOR DELAY` in the second MSSQL payload
+- **IDOR body comparison added to primary detection path** — when unauth is denied but both users get 2xx, bodies are now compared; similar → CONFIRMED, different → LIKELY (prevents FP on shared endpoints like `/api/me`)
+
+### Robustness
+
+- **OOB `poll()` uses wall-clock timeout** — `time.monotonic()` deadline replaces additive `elapsed += poll_interval` that drifted with network I/O time
+- **`navigate()` accepts caller-controllable timeout** — new `timeout_ms` parameter (default 30s) passed to Playwright's `page.goto()`
+- **`login_form` post-submit wait has 30s timeout** — `wait_for_load_state("networkidle")` no longer hangs indefinitely on long-polling pages
+
+### Validation & Safety
+
+- **`from_yaml` validates scope rule dicts** — missing `pattern`/`type` keys now raise `ValueError` with rule index and content, instead of raw `KeyError`
+- **CLI `_safe_close_http` uses explicit event loop lifecycle** — `asyncio.new_event_loop()` with proper `try/finally/close()` instead of fragile `asyncio.run()` after prior loop closure
 
 ---
 

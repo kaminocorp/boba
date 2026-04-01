@@ -233,7 +233,13 @@ class ScopeEngine:
             data = yaml.safe_load(f)
 
         rules = []
-        for r in data.get("rules", []):
+        for i, r in enumerate(data.get("rules", [])):
+            if not isinstance(r, dict):
+                raise ValueError(f"Scope rule #{i} must be a dict, got {type(r).__name__}")
+            if "pattern" not in r:
+                raise ValueError(f"Scope rule #{i} missing required 'pattern' key: {r}")
+            if "type" not in r:
+                raise ValueError(f"Scope rule #{i} missing required 'type' key: {r}")
             rules.append(
                 ScopeRule(
                     pattern=r["pattern"],

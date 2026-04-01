@@ -186,13 +186,14 @@ class BrowserManager:
         url: str,
         context_name: str = "default",
         wait_until: str = "networkidle",
+        timeout_ms: float = 30_000,
     ) -> PageInfo:
         """Navigate to URL, wait for load, return page info."""
         page = await self._get_page(context_name)
         self._request_counts[context_name] = 0
 
         start = time.monotonic()
-        response = await page.goto(url, wait_until=wait_until)
+        response = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
         elapsed = (time.monotonic() - start) * 1000
 
         status_code = response.status if response else 0

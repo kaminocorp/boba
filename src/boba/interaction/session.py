@@ -136,7 +136,7 @@ class SessionManager:
                 "Tried: [type='submit'], button, input, text patterns."
             )
 
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("networkidle", timeout=30_000)
 
         # Capture auth state
         cookies_raw = await browser.get_cookies(session_name)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from boba.core.errors import HuntNotFoundError
@@ -325,8 +325,22 @@ class HuntContext:
         rows = self._conn.execute("SELECT * FROM hunts ORDER BY created_at DESC").fetchall()
         return [self._row_to_hunt(r) for r in rows]
 
+    # Valid state transitions: active→paused, active→completed, paused→active, paused→completed
+    _VALID_TRANSITIONS: dict[HuntStatus, frozenset[HuntStatus]] = {
+        HuntStatus.ACTIVE: frozenset({HuntStatus.PAUSED, HuntStatus.COMPLETED}),
+        HuntStatus.PAUSED: frozenset({HuntStatus.ACTIVE, HuntStatus.COMPLETED}),
+        HuntStatus.COMPLETED: frozenset(),  # terminal state
+    }
+
     def update_hunt_status(self, hunt_id: str, status: HuntStatus) -> None:
-        self.get_hunt(hunt_id)  # raises if not found
+        hunt = self.get_hunt(hunt_id)  # raises if not found
+        current = HuntStatus(hunt.status) if isinstance(hunt.status, str) else hunt.status
+        allowed = self._VALID_TRANSITIONS.get(current, frozenset())
+        if status not in allowed:
+            raise ValueError(
+                f"Cannot transition hunt '{hunt_id}' from {current.value} to {status.value}. "
+                f"Allowed transitions: {', '.join(s.value for s in sorted(allowed, key=lambda s: s.value)) or 'none (terminal state)'}"
+            )
         self._conn.execute(
             "UPDATE hunts SET status = ?, updated_at = ? WHERE id = ?",
             (status.value, _now(), hunt_id),
@@ -613,7 +627,14 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def log_tool_run(self, hunt_id: str, result: ToolResult) -> int:
-        now = _now()
+        finished_at = _now()
+        # Compute started_at from finished time minus duration for accurate audit trails
+        try:
+            finished_dt = datetime.fromisoformat(finished_at)
+            started_dt = finished_dt - timedelta(seconds=result.duration_seconds)
+            started_at = started_dt.isoformat()
+        except (ValueError, OverflowError):
+            started_at = finished_at
         cursor = self._conn.execute(
             """INSERT INTO tool_runs
                 (hunt_id, tool_name, command_json, status, started_at, finished_at,
@@ -622,7 +643,7 @@ class HuntContext:
             (
                 hunt_id, result.tool_name, json.dumps(result.command),
                 "completed" if result.exit_code == 0 and not result.timed_out else "failed",
-                now, now, result.duration_seconds, result.exit_code,
+                started_at, finished_at, result.duration_seconds, result.exit_code,
                 len(result.records), result.filtered_count,
                 1 if result.timed_out else 0,
                 result.raw_stderr[:1000] if result.exit_code != 0 else None,
@@ -935,6 +956,8 @@ class HuntContext:
                 request_ids = excluded.request_ids,
                 tool_run_id = excluded.tool_run_id,
                 confirmed = excluded.confirmed,
+                false_positive = excluded.false_positive,
+                reported = excluded.reported,
                 template_id = excluded.template_id,
                 tags = excluded.tags,
                 updated_at = excluded.updated_at""",

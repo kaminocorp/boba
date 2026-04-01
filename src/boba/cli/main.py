@@ -43,11 +43,19 @@ def _safe_close(manager) -> None:
 
 
 def _safe_close_http(client) -> None:
-    """Close HttpClient connection pool without masking the original exception."""
+    """Close HttpClient connection pool without masking the original exception.
+
+    Uses a new event loop since the previous asyncio.run() already closed its loop.
+    The httpx AsyncClient handles cross-loop closure gracefully.
+    """
     if client is None:
         return
     try:
-        asyncio.run(client.close())
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(client.close())
+        finally:
+            loop.close()
     except Exception:
         pass
 

@@ -90,15 +90,28 @@ async def test_idor(
     unauth_denied = resp_unauth.status_code in (401, 403)
 
     if b_success and a_success and unauth_denied:
-        # User B can access User A's resource, but unauthenticated cannot
-        vulnerable = True
-        confidence = Confidence.CONFIRMED
-        description = (
-            f"User B ({session_b.name}) received {resp_b.status_code} for {endpoint}, "
-            f"same as User A ({resp_a.status_code}), "
-            f"while unauthenticated got {resp_unauth.status_code}. "
-            "This indicates broken access control."
-        )
+        # User B can access User A's resource, but unauthenticated cannot.
+        # Compare bodies to guard against shared endpoints (e.g. /api/me)
+        # where both users get 200 but with their own data.
+        body_similar = _bodies_similar(resp_a.body, resp_b.body)
+        if body_similar:
+            vulnerable = True
+            confidence = Confidence.CONFIRMED
+            description = (
+                f"User B ({session_b.name}) received {resp_b.status_code} for {endpoint} "
+                f"with similar body to User A ({resp_a.status_code}), "
+                f"while unauthenticated got {resp_unauth.status_code}. "
+                "This indicates broken access control."
+            )
+        else:
+            vulnerable = True
+            confidence = Confidence.LIKELY
+            description = (
+                f"User B ({session_b.name}) received {resp_b.status_code} for {endpoint}, "
+                f"same as User A ({resp_a.status_code}), "
+                f"while unauthenticated got {resp_unauth.status_code}. "
+                "Bodies differ — may be a shared endpoint returning user-specific data."
+            )
     elif b_success and a_success:
         # Both succeed — could be public endpoint or IDOR
         body_similar = _bodies_similar(resp_a.body, resp_b.body)

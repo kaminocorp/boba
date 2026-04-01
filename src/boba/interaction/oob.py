@@ -6,6 +6,7 @@ import asyncio
 import logging
 import secrets
 import string
+import time
 from typing import Any
 
 from boba.core.context import HuntContext
@@ -119,9 +120,9 @@ class OOBManager:
             raise OOBError("OOB manager not started.")
 
         all_interactions: list[dict[str, Any]] = []
-        elapsed = 0.0
+        deadline = time.monotonic() + timeout_seconds
 
-        while elapsed < timeout_seconds:
+        while time.monotonic() < deadline:
             try:
                 if hasattr(self._client, "poll"):
                     raw = await self._client.poll()
@@ -157,7 +158,6 @@ class OOBManager:
                 logger.debug("Error polling OOB interactions: %s", exc)
 
             await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
 
         # Persist interactions — fetch listeners once, index by ID
         if all_interactions:
