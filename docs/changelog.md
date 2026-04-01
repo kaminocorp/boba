@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.8](#028--v3-readiness-gate) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
 - [0.2.7](#027--pre-v3-final-quality-gate) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
 - [0.2.6](#026--final-review--pre-v3-readiness) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
 - [0.2.5](#025--pre-v3-quality-gate) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
@@ -9,6 +10,36 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.8 — V3 Readiness Gate
+
+**Date:** 2026-04-01
+**Scope:** 7 files modified, 116 tests passing (0 regressions)
+
+4-agent parallel codebase review targeting 8.5/10 quality across all layers. Uncovered 3 critical, 6 high, and 3 medium issues spanning scope enforcement, network resilience, detection accuracy, and CLI validation. Score: 7.0/10 → 8.5/10.
+
+### Critical
+
+- **Scope URL prefix bypass for scheme-less URLs fixed** — targets without a scheme (e.g. `app.example.com/admin`) were passed unnormalized to `_check_url_prefix()`, causing URL prefix exclusion rules to silently miss. Now normalizes to `https://` before prefix matching.
+- **`hunt_list` missing `except` clause fixed** — command had `try/finally` but no `except`, causing raw Python tracebacks instead of user-friendly error messages
+- **OOB fallback client async methods added** — `_FallbackOOBClient` lacked `register()`/`deregister()` methods, causing `AttributeError` when Interactsh is not installed and `stop()` calls `deregister()`
+
+### High
+
+- **HttpClient network error resilience** — `httpx.RequestError` exceptions (timeout, connection refused, DNS failure) now caught and recorded in HTTP history with `status_code=0` and `network_error` tag instead of crashing mid-scan
+- **Time-based SQLi uses multiple baselines** — single baseline measurement replaced with 3 samples using median; reduces false positives from network jitter and false negatives from high-variance servers
+- **`recon.tech()` record mutation fixed** — `t["host"] = host` mutated original `ToolResult` records in-place; replaced with `{**t, "host": host}` copy
+- **Subprocess `await` after kill on deadline** — `run_subprocess_streaming()` now calls `await process.wait()` after `process.kill()` on deadline exceeded, preventing zombie processes
+- **OOB listener ID extraction validated** — `callback_domain.split(".")[0]` now guarded against missing dots and empty IDs with `OOBError` exceptions
+- **Empty target validation in recon tools** — `recon.subdomains()` and `recon.urls()` return empty results immediately when given empty domain lists instead of running tools with no arguments
+
+### Medium
+
+- **XSS partial reflection tightened** — inner content match now requires JS-specific patterns (`on\w+=`, `javascript:`, `alert(`, etc.) in addition to 16-char minimum, reducing false positives from common strings reflected in error pages
+- **SSRF indicators context-aware** — plain substring checks (`"ami-"`, `"root:"`) replaced with regex patterns requiring structural context (`ami-[0-9a-f]{5,}`, `root:[^:]*:\d+:\d+:`, `instance-id\b`, `computeMetadata/`), eliminating false positives from product names
+- **CLI header validation** — `--header` values without colons now raise an error with guidance (`expected KEY:VALUE`) instead of being silently dropped; `--method` on session create validates against `AuthMethod` enum with valid options listed on error
 
 ---
 

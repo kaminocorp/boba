@@ -92,7 +92,36 @@ class HttpClient:
         }
         if timeout_seconds is not None:
             req_kwargs["timeout"] = timeout_seconds
-        resp = await self._client.request(**req_kwargs)
+
+        try:
+            resp = await self._client.request(**req_kwargs)
+        except httpx.RequestError as exc:
+            elapsed_ms = (time.monotonic() - start) * 1000
+            logger.warning("HTTP request failed for %s %s: %s", method, url, exc)
+            # Record the failed request in history for audit trail
+            record_id = self._sink.record(
+                method=method,
+                url=url,
+                request_headers=headers or {},
+                request_body=body,
+                status_code=0,
+                response_headers={},
+                response_body=f"Network error: {exc}".encode(),
+                elapsed_ms=elapsed_ms,
+                source=source,
+                session_name=session_name,
+                parent_request_id=parent_request_id,
+                tags=(tags or []) + ["network_error"],
+            )
+            return HttpResponse(
+                request_id=record_id,
+                status_code=0,
+                headers={},
+                body=b"",
+                body_text="",
+                elapsed_ms=elapsed_ms,
+                redirect_chain=[],
+            )
 
         # Track redirect chain
         if resp.history:

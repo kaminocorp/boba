@@ -79,7 +79,11 @@ class OOBManager:
             # Fallback generates a random subdomain
             callback_domain = self._client.get_domain()
 
+        if not callback_domain or "." not in callback_domain:
+            raise OOBError(f"Invalid callback domain from OOB client: {callback_domain!r}")
         listener_id = callback_domain.split(".")[0]
+        if not listener_id:
+            raise OOBError(f"Empty listener ID extracted from domain: {callback_domain!r}")
 
         self._listeners[listener_id] = {
             "callback_domain": callback_domain,
@@ -192,6 +196,12 @@ class _FallbackOOBClient:
 
     def __init__(self):
         self._base_domain = "oast.local"
+
+    async def register(self) -> None:
+        """No-op registration for fallback client."""
+
+    async def deregister(self) -> None:
+        """No-op deregistration for fallback client."""
 
     def get_domain(self) -> str:
         rand = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12))

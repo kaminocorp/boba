@@ -29,6 +29,9 @@ async def subdomains(
 
     Runs subfinder with all sources, scope-filters, persists to context.
     """
+    if not domains:
+        return _empty_result("subfinder")
+
     scope = ScopeEngine(hunt.scope)
     adapter = SubfinderAdapter(scope_engine=scope)
     result = await adapter.run(targets=domains, config=config)
@@ -105,6 +108,9 @@ async def urls(
 
     Merges and deduplicates results. Sources are tracked per URL.
     """
+    if not domains:
+        return _empty_result("recon.urls")
+
     scope = ScopeEngine(hunt.scope)
     gau_adapter = GauAdapter(scope_engine=scope)
     wayback_adapter = WaybackurlsAdapter(scope_engine=scope)
@@ -168,8 +174,7 @@ async def tech(
     for record in result.records:
         host = record.get("host", "")
         for t in record.get("technologies", []):
-            t["host"] = host
-            flat_techs.append(t)
+            flat_techs.append({**t, "host": host})
     if flat_techs:
         context.upsert_records(hunt.id, "technology", flat_techs, source="whatweb")
     context.log_tool_run(hunt.id, result)

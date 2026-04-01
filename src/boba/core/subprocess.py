@@ -137,6 +137,7 @@ async def run_subprocess_streaming(
         while True:
             if time.monotonic() > deadline:
                 process.kill()
+                await process.wait()
                 break
             try:
                 line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)

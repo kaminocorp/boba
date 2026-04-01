@@ -85,6 +85,9 @@ def hunt_list(fmt: FormatOption = "table", data_dir: DataDirOption = None) -> No
             for h in hunts
         ]
         format_output(records, fmt=fmt, title="Hunts")
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -681,9 +684,11 @@ def http_request(
         headers = {}
         if header:
             for h in header:
-                if ":" in h:
-                    k, v = h.split(":", 1)
-                    headers[k.strip()] = v.strip()
+                if ":" not in h:
+                    print_error(f"Invalid header format: '{h}' (expected KEY:VALUE)")
+                    raise typer.Exit(1)
+                k, v = h.split(":", 1)
+                headers[k.strip()] = v.strip()
 
         resp = asyncio.run(client.request(
             method=method, url=url, headers=headers or None, body=body,
@@ -726,9 +731,11 @@ def http_replay(
         if modify_header:
             headers = {}
             for h in modify_header:
-                if ":" in h:
-                    k, v = h.split(":", 1)
-                    headers[k.strip()] = v.strip()
+                if ":" not in h:
+                    print_error(f"Invalid header format: '{h}' (expected KEY:VALUE)")
+                    raise typer.Exit(1)
+                k, v = h.split(":", 1)
+                headers[k.strip()] = v.strip()
             modifications["headers"] = headers
         if modify_body:
             modifications["body"] = modify_body
@@ -798,9 +805,15 @@ def session_create(
         from boba.core.models import AuthMethod
         from boba.interaction.session import SessionManager
 
+        try:
+            auth_method = AuthMethod(method)
+        except ValueError:
+            valid = [m.value for m in AuthMethod]
+            print_error(f"Invalid auth method '{method}'. Valid: {valid}")
+            raise typer.Exit(1)
         manager.get(hunt_id)
         mgr = SessionManager(manager.context, hunt_id)
-        state = mgr.create(name, target, AuthMethod(method))
+        state = mgr.create(name, target, auth_method)
         if fmt == "json":
             format_output({"name": state.name, "target_url": state.target_url,
                            "auth_method": state.auth_method.value}, fmt="json")

@@ -199,21 +199,24 @@ async def test_ssrf(
             request_ids.append(resp.request_id)
 
             # Check for strong SSRF indicators in response (content that could
-            # only appear if the server fetched an internal resource)
-            body_lower = resp.body_text.lower()
-            ssrf_confirmed_indicators = [
-                "root:", "/bin/bash",  # /etc/passwd content
-                "ami-", "instance-id",  # AWS metadata fields
-                "computeMetadata",  # GCP metadata
+            # only appear if the server fetched an internal resource).
+            # Use context-aware regex to reduce false positives from
+            # product names or error messages containing indicator substrings.
+            ssrf_indicator_patterns = [
+                (r"root:[^:]*:\d+:\d+:", "passwd_entry"),       # /etc/passwd format
+                (r"/bin/(ba)?sh", "shell_path"),                 # Shell binary path
+                (r"ami-[0-9a-f]{5,}", "aws_ami_id"),            # AWS AMI ID format
+                (r"instance-id\b", "aws_instance"),              # AWS metadata field
+                (r"computeMetadata/", "gcp_metadata"),           # GCP metadata path
             ]
-            for indicator in ssrf_confirmed_indicators:
-                if indicator in body_lower:
+            for pattern, indicator_type in ssrf_indicator_patterns:
+                if re.search(pattern, resp.body_text, re.IGNORECASE):
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
                     evidence.append({
                         "payload": payload,
                         "param": param_name,
-                        "indicator": indicator,
+                        "indicator": indicator_type,
                         "status_code": resp.status_code,
                         "request_id": resp.request_id,
                     })
@@ -352,9 +355,12 @@ async def test_xss(
 
             # Check for partial reflection: extract inner content between tags
             # e.g. "<script>alert(1)</script>" → check for "alert(1)"
-            # Use a 16-char minimum to avoid matching common JS snippets
+            # Require 16+ chars AND JS-specific patterns to reduce false positives
             inner = re.sub(r"<[^>]*>", "", payload).strip()
-            if inner and len(inner) >= 16 and inner in resp.body_text:
+            has_js_context = bool(
+                re.search(r"(on\w+=|javascript:|alert\(|prompt\(|confirm\()", inner, re.I)
+            )
+            if inner and len(inner) >= 16 and has_js_context and inner in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.POSSIBLE
                 evidence.append({
@@ -506,7 +512,8 @@ async def test_sqli(
                 "diff": len_diff,
             })
 
-        # Time-based detection — only if not already confirmed via error/boolean
+        # Time-based detection — only if not already confirmed via error/boolean.
+        # Uses multiple baseline samples to reduce false positives from network jitter.
         if not vulnerable:
             time_payloads = (
                 sqli_payloads.TIME_BASED_MYSQL
@@ -514,7 +521,18 @@ async def test_sqli(
                 + sqli_payloads.TIME_BASED_MSSQL
                 + sqli_payloads.TIME_BASED_SQLITE
             )
-            baseline_time = resp_baseline.elapsed_ms
+            # Collect multiple baseline timing samples for statistical robustness
+            baseline_samples = [resp_baseline.elapsed_ms]
+            for _ in range(2):
+                resp_bl = await http_client.request(
+                    method=method, url=baseline_url,
+                    headers=headers, cookies=cookies,
+                    source="test_sqli", tags=["sqli", "baseline_timing"],
+                )
+                request_ids.append(resp_bl.request_id)
+                baseline_samples.append(resp_bl.elapsed_ms)
+            baseline_median = sorted(baseline_samples)[len(baseline_samples) // 2]
+
             for payload in time_payloads:
                 test_url = _inject_param(url, param_name, f"{default_val}{payload}")
                 resp_time = await http_client.request(
@@ -524,8 +542,8 @@ async def test_sqli(
                     timeout_seconds=15.0,
                 )
                 request_ids.append(resp_time.request_id)
-                # A SLEEP(5) payload should add ≥3s over baseline
-                delay_ms = resp_time.elapsed_ms - baseline_time
+                # A SLEEP(5) payload should add ≥3s over the median baseline
+                delay_ms = resp_time.elapsed_ms - baseline_median
                 if delay_ms >= 3000:
                     vulnerable = True
                     confidence = Confidence.LIKELY
@@ -533,7 +551,7 @@ async def test_sqli(
                         "type": "time_based",
                         "payload": payload,
                         "param": param_name,
-                        "baseline_ms": baseline_time,
+                        "baseline_median_ms": baseline_median,
                         "response_ms": resp_time.elapsed_ms,
                         "delay_ms": delay_ms,
                         "request_id": resp_time.request_id,

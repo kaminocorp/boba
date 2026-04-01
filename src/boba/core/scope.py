@@ -100,10 +100,12 @@ class ScopeEngine:
             hostname = self._extract_hostname(target)
             return self._check_domain(hostname)
         elif entity_type == "url":
-            parsed = urlparse(target if "://" in target else f"https://{target}")
+            normalized = target if "://" in target else f"https://{target}"
+            parsed = urlparse(normalized)
             hostname = parsed.hostname or ""
-            # Check URL prefix exclusions/inclusions
-            url_result = self._check_url_prefix(target)
+            # Check URL prefix exclusions/inclusions using normalized URL
+            # so that scheme-less targets still match prefix rules
+            url_result = self._check_url_prefix(normalized)
             if url_result is not None:
                 # URL prefix rule matched; domain must also pass
                 if not url_result:
