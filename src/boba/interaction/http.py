@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import re
 import time
 from typing import Any
 
@@ -282,13 +283,20 @@ class HttpClient:
 
         results: list[dict[str, Any]] = []
 
-        # Send an unfuzzed baseline request first — using the first payload as
-        # baseline can give skewed results if the first payload triggers an anomaly.
+        # Send an unfuzzed baseline request — substitute empty strings for all
+        # marker positions so the server sees a "normal" request rather than
+        # literal §marker§ characters (which would produce a meaningless baseline).
+        _marker_re = re.compile(rf"{re.escape(FUZZ_MARKER)}[^{re.escape(FUZZ_MARKER)}]*{re.escape(FUZZ_MARKER)}")
+        baseline_url = _marker_re.sub("", url)
+        baseline_body = _marker_re.sub("", body) if body else body
+        baseline_headers = (
+            {k: _marker_re.sub("", v) for k, v in headers.items()} if headers else headers
+        )
         baseline_resp = await self.request(
             method=method,
-            url=url,
-            headers=headers,
-            body=body,
+            url=baseline_url,
+            headers=baseline_headers,
+            body=baseline_body,
             cookies=cookies,
             source="fuzz",
             session_name=session_name,

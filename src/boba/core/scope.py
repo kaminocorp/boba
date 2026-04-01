@@ -150,13 +150,28 @@ class ScopeEngine:
                 return True
         return False
 
+    @staticmethod
+    def _url_prefix_match(url: str, prefix: str) -> bool:
+        """Check if *url* starts with *prefix* on a path boundary.
+
+        A naive ``startswith`` allows ``https://example.com.evil.com`` to match
+        prefix ``https://example.com``.  We require the character immediately
+        after the prefix (if any) to be ``/``, ``?``, ``#``, ``:``, or end-of-
+        string so that the match cannot "bleed" into a different hostname.
+        """
+        if not url.startswith(prefix):
+            return False
+        if len(url) == len(prefix):
+            return True
+        return url[len(prefix)] in ("/"  , "?", "#", ":")
+
     def _check_url_prefix(self, url: str) -> bool | None:
         """Check URL prefix rules. Returns None if no rule matched."""
         for prefix in self._url_excludes:
-            if url.startswith(prefix):
+            if self._url_prefix_match(url, prefix):
                 return False
         for prefix in self._url_includes:
-            if url.startswith(prefix):
+            if self._url_prefix_match(url, prefix):
                 return True
         return None
 

@@ -1079,14 +1079,16 @@ def ctx_http_history(
             source=source,
             limit=limit,
         )
-        # Simplify for display
-        for r in records:
-            r.pop("request_headers", None)
-            r.pop("response_headers", None)
-            r.pop("request_body", None)
-            r.pop("response_body", None)
-            r.pop("request_body_ref", None)
-            r.pop("response_body_ref", None)
+        # For table display, strip verbose fields; for JSON, keep everything
+        # so machine consumers (agents) get the full record.
+        if fmt == "table":
+            for r in records:
+                r.pop("request_headers", None)
+                r.pop("response_headers", None)
+                r.pop("request_body", None)
+                r.pop("response_body", None)
+                r.pop("request_body_ref", None)
+                r.pop("response_body_ref", None)
         format_output(
             records,
             fmt=fmt,

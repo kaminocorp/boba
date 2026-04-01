@@ -14,6 +14,10 @@ from boba.interaction.history import HttpHistorySink
 
 logger = logging.getLogger(__name__)
 
+# Cap per-response body read to prevent OOM from malicious/misconfigured targets.
+# Matches HttpClient's DEFAULT_MAX_RESPONSE_BYTES.
+_MAX_BROWSER_RESPONSE_BYTES = 50 * 1024 * 1024
+
 
 class BrowserManager:
     """Owns a Playwright browser instance and named browser contexts.
@@ -139,6 +143,14 @@ class BrowserManager:
         async def _on_response(response: Any) -> None:
             try:
                 body = await response.body()
+                if body and len(body) > _MAX_BROWSER_RESPONSE_BYTES:
+                    logger.warning(
+                        "Truncating browser response body for %s (%d bytes > %d cap)",
+                        response.url,
+                        len(body),
+                        _MAX_BROWSER_RESPONSE_BYTES,
+                    )
+                    body = body[:_MAX_BROWSER_RESPONSE_BYTES]
             except Exception as exc:
                 logger.debug("Could not read response body for %s: %s", response.url, exc)
                 body = None

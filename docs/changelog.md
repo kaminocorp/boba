@@ -1,19 +1,20 @@
 # Changelog
 
-- [0.2.18](#0218--pre-v3-scope-pre-filter-fix) — Critical fix: `pre_filter_targets()` used `PRODUCES` as entity type, breaking 4 adapters (naabu, whatweb, ffuf, nuclei). Now uses `"auto"`. 6 new tests (421 total)
-- [0.2.17](#0217--pre-v3-parse-robustness--data-integrity) — Adapter type guards (6 adapters), BaseAdapter JSON_OBJECT non-dict fix, finding upsert flag preservation via `MAX()`, HttpClient response body size limit (50 MB), CLI cleanup logging, 1 new test file + 27 new tests (415 total)
-- [0.2.16](#0216--pre-v3-architecture-review) — Atomic batch upserts, PRAGMA validation, scope default-deny enforcement, browser context lock, CLI `_managed` context managers (41x dedup), SQLi false-condition baseline guard, 1 new test file + 27 new tests (388 total)
-- [0.2.15](#0215--v3-readiness-final-gate) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
-- [0.2.14](#0214--pre-v3-quality-gate) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
-- [0.2.13](#0213--another-v3-readiness-audit) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
-- [0.2.12](#0212--another-v3-readiness-review) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
-- [0.2.11](#0211--pre-v3-quality-gate--test-coverage) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
-- [0.2.10](#0210--v3-readiness-final-quality-pass) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
-- [0.2.9](#029--v3-readiness-final-gate) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
-- [0.2.8](#028--v3-readiness-gate) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
-- [0.2.7](#027--pre-v3-final-quality-gate) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
-- [0.2.6](#026--final-review--pre-v3-readiness) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
-- [0.2.5](#025--pre-v3-quality-gate) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
+- [0.2.19](#0219--scope-bypass-fuzz-baseline--session-cache-safety) — URL prefix cross-domain scope bypass, fuzz baseline marker stripping, `list_sessions()` deep-copy consistency, browser body size cap, CLI http-history JSON data preservation. 5 fixes + 8 new tests (429 total)
+- [0.2.18](#0218--scope-pre-filter-entity-type-fix) — Critical fix: `pre_filter_targets()` used `PRODUCES` as entity type, breaking 4 adapters (naabu, whatweb, ffuf, nuclei). Now uses `"auto"`. 6 new tests (421 total)
+- [0.2.17](#0217--adapter-parse-guards--finding-flag-preservation) — Adapter type guards (6 adapters), BaseAdapter JSON_OBJECT non-dict fix, finding upsert flag preservation via `MAX()`, HttpClient response body size limit (50 MB), CLI cleanup logging, 1 new test file + 27 new tests (415 total)
+- [0.2.16](#0216--atomic-upserts--cli-context-manager-dedup) — Atomic batch upserts, PRAGMA validation, scope default-deny enforcement, browser context lock, CLI `_managed` context managers (41x dedup), SQLi false-condition baseline guard, 1 new test file + 27 new tests (388 total)
+- [0.2.15](#0215--upsert-commit-safety--detection-hardening) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
+- [0.2.14](#0214--idor-json-comparison--cli-dedup--enum-crawl) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
+- [0.2.13](#0213--false-positive-reduction--gau-arg_max-fix) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
+- [0.2.12](#0212--injection-prevention--fuzz-header-substitution) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
+- [0.2.11](#0211--scope-yaml-null-fix--test-coverage-expansion) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
+- [0.2.10](#0210--finding-staleness--hunt-state-validation--timeouts) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
+- [0.2.9](#029--httpclient-connection-leak--jwt-padding-fix) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
+- [0.2.8](#028--scope-url-bypass--httpclient-resilience--sqli-timing) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
+- [0.2.7](#027--safe_close-recursion--oob-performance--cluster-bomb-cap) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
+- [0.2.6](#026--per-request-timeout--time-based-sqli--jwt-hardening) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
+- [0.2.5](#025--subprocess-exit-codes--scope-url-bypass--adapter-logging) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
 - [0.2.4](#024--operational-robustness) — Persistent HTTP client, body_text truncation fix, diagnostic logging, SQLi baseline fix
 - [0.2.3](#023--data-integrity--resource-safety) — Technology commit fix, broader parse error handling, HuntContext context manager, lint cleanup, gather partial results
 - [0.2.2](#022--detection-correctness--defensive-robustness) — IDOR URL path fix, SSRF indicators, auth regex, XSS reflection, subprocess signaling, CLI hardening
@@ -23,7 +24,67 @@
 
 ---
 
-## 0.2.18 — Pre-V3 Scope Pre-Filter Fix
+## 0.2.19 — Scope Bypass, Fuzz Baseline & Session Cache Safety
+
+**Date:** 2026-04-01
+**Scope:** 5 files fixed, 8 new tests, 429 tests passing (8 new, 0 regressions)
+
+5-agent parallel codebase review across all layers (core, adapters, interaction, tools/vuln, CLI/tests). ~35 raw findings triaged down to 5 real, actionable issues. Two layers (adapters, tools/vuln) came back clean — zero bugs after 18 rounds of prior hardening. The remaining 5 fixes address a scope bypass, broken fuzz baselines, cache mutation safety, CLI data loss for agent consumers, and an OOM vector. Test count: 421 → 429.
+
+### URL Prefix Cross-Domain Scope Bypass (HIGH)
+
+- **`_check_url_prefix()` used bare `startswith()` allowing cross-domain matches** — A URL prefix rule for `https://example.com` (stored after stripping trailing `*` and `/`) would match `https://example.com.evil.com/path` because Python's `str.startswith("https://example.com")` returns `True` for both. In a security tool with default-deny scope enforcement, this is a scope bypass — an out-of-scope domain passes the inclusion check.
+
+  **Fix:** Added `_url_prefix_match()` static method that requires the character immediately after the prefix (if any) to be `/`, `?`, `#`, or `:` (port separator). This enforces a path boundary so the prefix cannot bleed into a different hostname.
+
+### Fuzz Baseline Sent with Literal Marker Characters (MEDIUM)
+
+- **`fuzz()` baseline request contained raw `§marker§` strings** — The baseline request (used as the reference for anomaly detection) was sent with the original template URL/body containing literal `§id§`, `§name§` etc. marker characters. The server would typically return a 400 or unexpected error for these, making the baseline useless — anomaly detection would then either flag everything as anomalous (if baseline errors differ from fuzzed responses) or nothing (if both error identically).
+
+  **Fix:** Baseline URL, body, and headers now have all `§...§` markers replaced with empty strings via regex before sending, matching the sniper attack type's behavior for non-active positions. The compiled regex uses `FUZZ_MARKER` constant for consistency.
+
+### `list_sessions()` Returns Mutable Cache References (MEDIUM)
+
+- **`SessionManager.list_sessions()` returned objects shared with `self._cache`** — Unlike `get()` which returns `copy.deepcopy()` to protect the internal cache, `list_sessions()` returned the same `SessionState` objects stored in the cache. A caller mutating a returned session (e.g., `sessions[0].cookies["foo"] = "bar"`) would silently corrupt the cache without persisting the change to the database.
+
+  **Fix:** `list_sessions()` now returns `copy.deepcopy(state)` for each session, consistent with `get()`.
+
+### CLI `context http-history --format json` Strips Fields (MEDIUM)
+
+- **JSON output for http-history silently dropped request/response headers and bodies** — The `ctx_http_history` command unconditionally popped `request_headers`, `response_headers`, `request_body`, `response_body`, `request_body_ref`, and `response_body_ref` from records before formatting. This is appropriate for `--format table` (columns would be too wide) but causes data loss for `--format json` where agent/script consumers need the full record.
+
+  **Fix:** Field stripping now only applies when `fmt == "table"`. JSON output preserves the complete record.
+
+### Browser Response Body Size Cap (LOW)
+
+- **Browser `_on_response` handler read response bodies with no size limit** — `HttpClient` caps response bodies at 50 MB (`DEFAULT_MAX_RESPONSE_BYTES`), but the Playwright browser interception handler called `await response.body()` with no size check. A malicious or misconfigured target serving a multi-GB response through the browser path could cause OOM before the body reached disk persistence.
+
+  **Fix:** Added `_MAX_BROWSER_RESPONSE_BYTES = 50 * 1024 * 1024` cap in `browser.py`. Bodies exceeding the cap are truncated with a warning log, consistent with `HttpClient` behavior.
+
+### Test Coverage (8 new tests)
+
+- **`tests/core/test_scope.py::TestURLPrefixBoundary`** (6 tests):
+  - Cross-domain prefix does not match (`example.com` vs `example.com.evil.com`) (1 test)
+  - Prefix matches with path separator `/` (1 test)
+  - Prefix matches with query string `?` (1 test)
+  - Prefix matches exact URL (1 test)
+  - Prefix matches with port `:8443` (1 test)
+  - Exclusion prefix respects boundary on cross-domain (1 test)
+
+- **`tests/interaction/test_http.py::TestFuzzBaseline`** (1 test):
+  - Baseline request has all `§marker§` strings stripped to empty strings
+
+- **`tests/interaction/test_session.py::TestListSessionsDeepCopy`** (1 test):
+  - Mutating returned session does not corrupt internal cache
+
+### Review Layers That Came Back Clean
+
+- **Adapters (10 files)** — No command injection (list-based `create_subprocess_exec`), all `parse_record` methods have type guards, scope mode assignments are correct, binary discovery is safe, error handling preserves partial results.
+- **Tools/vuln (8 files)** — Detection heuristics sound (IDOR three-way comparison, SQLi dual-guard boolean, XSS entity-encoding awareness, SSRF context-aware regex). Payload safety verified (all read-only). Multi-adapter pipelines use `return_exceptions=True` for partial result preservation.
+
+---
+
+## 0.2.18 — Scope Pre-Filter Entity Type Fix
 
 **Date:** 2026-04-01
 **Scope:** 1 file fixed, 6 new tests, 421 tests passing (6 new, 0 regressions)
@@ -68,7 +129,7 @@ For transparency, these findings from the 5-agent review were investigated and d
 
 ---
 
-## 0.2.17 — Pre-V3 Parse Robustness & Data Integrity
+## 0.2.17 — Adapter Parse Guards & Finding Flag Preservation
 
 **Date:** 2026-04-01
 **Scope:** 8 files fixed, 1 new test file, 415 tests passing (27 new, 0 regressions)
@@ -122,7 +183,7 @@ For transparency, these findings from the 5-agent review were investigated and d
 
 ---
 
-## 0.2.16 — Pre-V3 Architecture Review
+## 0.2.16 — Atomic Upserts & CLI Context Manager Dedup
 
 **Date:** 2026-04-01
 **Scope:** 5 files fixed, 1 new test file, 388 tests passing (27 new, 0 regressions)
@@ -169,7 +230,7 @@ Comprehensive 5-agent parallel codebase review across all layers (core, adapters
 
 ---
 
-## 0.2.15 — V3 Readiness Final Gate
+## 0.2.15 — Upsert Commit Safety & Detection Hardening
 
 **Date:** 2026-04-01
 **Scope:** 9 files fixed, 1 new test file, 361 tests passing (34 new, 0 regressions)
@@ -218,7 +279,7 @@ Comprehensive 5-agent parallel codebase review followed by targeted fixes for tr
 
 ---
 
-## 0.2.14 — Pre-V3 Quality Gate
+## 0.2.14 — IDOR JSON Comparison, CLI Dedup & Enum Crawl
 
 **Date:** 2026-04-01
 **Scope:** 8 files fixed, 3 new test files, 327 tests passing (41 new, 0 regressions)
@@ -285,7 +346,7 @@ Comprehensive 5-agent parallel codebase review followed by targeted fixes to bri
 
 ---
 
-## 0.2.13 — Another V3 Readiness Audit
+## 0.2.13 — False-Positive Reduction & GAU ARG_MAX Fix
 
 **Date:** 2026-04-01
 **Scope:** 10 files fixed, 1 test file expanded, 286 tests passing (21 new, 0 regressions)
@@ -329,7 +390,7 @@ Comprehensive 5-agent parallel codebase review followed by targeted fixes to bri
 
 ---
 
-## 0.2.12 — Another V3 Readiness Review
+## 0.2.12 — Injection Prevention & Fuzz Header Substitution
 
 **Date:** 2026-04-01
 **Scope:** 7 files fixed, 3 test files expanded/created, 265 tests passing (59 new, 0 regressions)
@@ -364,7 +425,7 @@ Comprehensive 5-agent parallel codebase review followed by targeted fixes to bri
 
 ---
 
-## 0.2.11 — Pre-V3 Quality Gate & Test Coverage
+## 0.2.11 — Scope YAML Null Fix & Test Coverage Expansion
 
 **Date:** 2026-04-01
 **Scope:** 5 files fixed, 8 new test files, 206 tests passing (90 new, 0 regressions)
@@ -391,7 +452,7 @@ Comprehensive 4-agent parallel codebase review followed by bug fixes and major t
 
 ---
 
-## 0.2.10 — V3 Readiness Final Quality Pass
+## 0.2.10 — Finding Staleness, Hunt State Validation & Timeouts
 
 **Date:** 2026-04-01
 **Scope:** 8 files modified, 116 tests passing (0 regressions)
@@ -420,7 +481,7 @@ Comprehensive 4-agent parallel codebase review followed by bug fixes and major t
 
 ---
 
-## 0.2.9 — V3 Readiness Final Gate
+## 0.2.9 — HttpClient Connection Leak & JWT Padding Fix
 
 **Date:** 2026-04-01
 **Scope:** 9 files modified, 116 tests passing (0 regressions)
@@ -445,7 +506,7 @@ Comprehensive 4-agent parallel codebase review followed by bug fixes and major t
 
 ---
 
-## 0.2.8 — V3 Readiness Gate
+## 0.2.8 — Scope URL Bypass, HttpClient Resilience & SQLi Timing
 
 **Date:** 2026-04-01
 **Scope:** 7 files modified, 116 tests passing (0 regressions)
@@ -475,7 +536,7 @@ Comprehensive 4-agent parallel codebase review followed by bug fixes and major t
 
 ---
 
-## 0.2.7 — Pre-V3 Final Quality Gate
+## 0.2.7 — _safe_close Recursion, OOB Performance & Cluster Bomb Cap
 
 **Date:** 2026-03-31
 **Scope:** 14 files modified, 116 tests passing (0 regressions)
@@ -501,7 +562,7 @@ Comprehensive 4-agent parallel codebase review followed by bug fixes and major t
 
 ---
 
-## 0.2.6 — Final Review & Pre-V3 Readiness
+## 0.2.6 — Per-Request Timeout, Time-Based SQLi & JWT Hardening
 
 **Date:** 2026-03-31
 **Scope:** 14 files modified, 116 tests passing (1 new, 0 regressions)
@@ -528,7 +589,7 @@ Comprehensive 5-agent parallel codebase review for V3-readiness. Fixed 7 correct
 
 ---
 
-## 0.2.5 — Pre-V3 Quality Gate
+## 0.2.5 — Subprocess Exit Codes, Scope URL Bypass & Adapter Logging
 
 **Date:** 2026-03-31
 **Scope:** 8 files modified, 115 tests passing (0 regressions)

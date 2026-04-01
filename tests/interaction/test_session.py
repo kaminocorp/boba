@@ -105,6 +105,19 @@ class TestListAndDelete:
         assert state.is_valid is False
 
 
+class TestListSessionsDeepCopy:
+    """list_sessions() must return deep copies, same as get()."""
+
+    def test_list_returns_deep_copies(self, mgr):
+        mgr.create("user_a", "https://app.example.com")
+        sessions = mgr.list_sessions()
+        # Mutate the returned object
+        sessions[0].cookies["injected"] = "evil"
+        # Original cache must be unaffected
+        fresh = mgr.get("user_a")
+        assert "injected" not in fresh.cookies
+
+
 class TestPersistence:
     def test_session_survives_new_manager(self, context, hunt_id):
         """Session created by one manager instance can be read by another."""

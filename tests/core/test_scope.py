@@ -90,6 +90,45 @@ class TestFilterTargets:
         assert set(out_of_scope) == {"evil.com", "internal.example.com"}
 
 
+class TestURLPrefixBoundary:
+    """URL prefix matching must not bleed into adjacent hostnames."""
+
+    def _engine(self, prefix: str, action=ScopeAction.INCLUDE):
+        rules = [
+            ScopeRule("*.example.com", ScopeRuleType.DOMAIN, ScopeAction.INCLUDE),
+            ScopeRule(prefix, ScopeRuleType.URL_PREFIX, action),
+        ]
+        return ScopeEngine(ScopeConfig(rules=rules))
+
+    def test_prefix_does_not_match_cross_domain(self):
+        """https://example.com prefix must NOT match https://example.com.evil.com."""
+        engine = self._engine("https://example.com")
+        assert engine.is_in_scope("https://example.com.evil.com/path") is False
+
+    def test_prefix_matches_with_path_separator(self):
+        engine = self._engine("https://app.example.com")
+        assert engine.is_in_scope("https://app.example.com/dashboard") is True
+
+    def test_prefix_matches_with_query_string(self):
+        engine = self._engine("https://app.example.com")
+        assert engine.is_in_scope("https://app.example.com?foo=bar") is True
+
+    def test_prefix_matches_exact(self):
+        engine = self._engine("https://app.example.com")
+        assert engine.is_in_scope("https://app.example.com") is True
+
+    def test_prefix_matches_with_port(self):
+        engine = self._engine("https://app.example.com")
+        assert engine.is_in_scope("https://app.example.com:8443/path") is True
+
+    def test_prefix_exclusion_cross_domain_not_excluded(self):
+        """Exclusion prefix must also respect boundary."""
+        engine = self._engine("https://example.com/admin", action=ScopeAction.EXCLUDE)
+        # example.com.evil.com should not be affected by the exclusion
+        # (but also rejected by domain check — just verify no crash)
+        assert engine.is_in_scope("https://example.com.evil.com/admin") is False
+
+
 class TestDefaultDeny:
     def test_empty_scope_denies_all(self):
         engine = ScopeEngine(ScopeConfig())

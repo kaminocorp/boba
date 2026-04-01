@@ -179,13 +179,17 @@ class SessionManager:
         return copy.deepcopy(state) if state else None
 
     def list_sessions(self) -> list[SessionState]:
-        """List all sessions for this hunt."""
+        """List all sessions for this hunt.
+
+        Returns deep copies so callers cannot accidentally mutate cached state,
+        consistent with ``get()``.
+        """
         rows = self._context.get_sessions(self._hunt_id)
         result = []
         for r in rows:
             state = self._row_to_state(r)
             self._cache[state.name] = state
-            result.append(state)
+            result.append(copy.deepcopy(state))
         return result
 
     def delete(self, session_name: str) -> None:

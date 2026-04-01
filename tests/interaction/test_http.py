@@ -188,6 +188,36 @@ class TestCompare:
         assert "differ" in result.body_diff_summary
 
 
+class TestFuzzBaseline:
+    """Fuzz baseline must strip marker characters, not send them to the server."""
+
+    @pytest.mark.asyncio
+    async def test_baseline_strips_markers(self, client):
+        """The baseline request should have markers replaced with empty strings."""
+        captured_urls: list[str] = []
+        mock_resp = _mock_response(status_code=200, content=b"ok", text="ok")
+
+        async def _capture(**kwargs):
+            captured_urls.append(kwargs.get("url", ""))
+            return mock_resp
+
+        client._client.request = _capture
+
+        await client.fuzz(
+            method="GET",
+            url="https://example.com/api?id=§id§&name=§name§",
+            positions=["id", "name"],
+            payloads={"id": ["1"], "name": ["test"]},
+            attack_type=FuzzAttackType.SNIPER,
+        )
+
+        # First request is the baseline — markers should be stripped
+        assert len(captured_urls) >= 1
+        baseline_url = captured_urls[0]
+        assert "§" not in baseline_url
+        assert baseline_url == "https://example.com/api?id=&name="
+
+
 class TestFuzzCombinations:
     """Test combination generation without network calls."""
 
