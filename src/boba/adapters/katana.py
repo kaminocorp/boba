@@ -40,12 +40,18 @@ class KatanaAdapter(BaseAdapter):
 
     def parse_record(self, raw: dict[str, Any]) -> dict[str, Any]:
         endpoint = raw.get("endpoint", raw.get("request", {}).get("endpoint", ""))
-        parsed = urlparse(endpoint)
+        try:
+            parsed = urlparse(endpoint)
+            host = parsed.hostname or ""
+            path = parsed.path
+            query = parsed.query
+        except Exception:
+            host, path, query = "", "", ""
         return {
             "url": endpoint,
-            "host": parsed.hostname or "",
-            "path": parsed.path,
-            "query": parsed.query,
+            "host": host,
+            "path": path,
+            "query": query,
             "found_on": raw.get("source", ""),
             "method": raw.get("request", {}).get("method", "GET"),
             "status_code": raw.get("response", {}).get("status_code"),

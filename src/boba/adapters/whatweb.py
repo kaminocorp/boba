@@ -56,9 +56,13 @@ class WhatwebAdapter(BaseAdapter):
             technologies.append(tech)
 
         target = raw.get("target", "")
+        try:
+            host = urlparse(target).hostname or "" if target else ""
+        except Exception:
+            host = ""
         return {
             "url": target,
-            "host": urlparse(target).hostname or "" if target else "",
+            "host": host,
             "status_code": raw.get("http_status"),
             "technologies": technologies,
         }

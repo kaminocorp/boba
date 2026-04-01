@@ -30,12 +30,18 @@ class GauAdapter(BaseAdapter):
 
     def parse_record(self, raw: str) -> dict[str, Any]:
         url = raw.strip()
-        parsed = urlparse(url)
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            path = parsed.path
+            query = parsed.query
+        except Exception:
+            host, path, query = "", "", ""
         return {
             "url": url,
-            "host": parsed.hostname or "",
-            "path": parsed.path,
-            "query": parsed.query,
+            "host": host,
+            "path": path,
+            "query": query,
             "source": "gau",
         }
 

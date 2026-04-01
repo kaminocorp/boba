@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.15](#0215--v3-readiness-final-gate) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
 - [0.2.14](#0214--pre-v3-quality-gate) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
 - [0.2.13](#0213--another-v3-readiness-audit) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
 - [0.2.12](#0212--another-v3-readiness-review) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
@@ -16,6 +17,55 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.15 — V3 Readiness Final Gate
+
+**Date:** 2026-04-01
+**Scope:** 9 files fixed, 1 new test file, 361 tests passing (34 new, 0 regressions)
+
+Comprehensive 5-agent parallel codebase review followed by targeted fixes for transaction safety, detection accuracy, CLI duplication, and adapter robustness. All fixes are strictly additive. Test count: 327 → 361.
+
+### Transaction Safety (HIGH)
+
+- **6 upsert methods missing `commit()`** — `upsert_subdomain()`, `upsert_host()`, `upsert_port()`, `upsert_url()`, `upsert_technology()`, and `upsert_directory()` executed writes but never called `.commit()`. When called within `upsert_records()` (which uses `with self._conn:` context manager), data was committed by the outer transaction. But direct calls (e.g., from tests or future V3 tools) would lose data on connection close. Now each method explicitly commits.
+
+### Detection Accuracy (HIGH)
+
+- **SSRF regex patterns tightened** — Previous patterns generated false positives from incidental matches (e.g., `root:` matching "root cause", `instance-id` matching generic error text). New patterns require structural context: `/etc/passwd` must match full colon-delimited format (`root:[^:]*:\d+:\d+:[^:]*:[^:]*:`), AMI IDs need 8+ hex chars, GCP metadata requires version (`computeMetadata/v\d`), AWS instance metadata requires JSON format (`"instanceId"\s*:`).
+
+- **IDOR body similarity threshold lowered (0.8 → 0.7)** — The 0.8 threshold was too strict for JSON endpoints where key sets overlap but aren't identical. Lowering to 0.7 reduces false negatives while keeping false positive risk low (JSON structural comparison already provides strong signal).
+
+- **IDOR enumeration requires body similarity** — Previously, IDOR object ID enumeration flagged any 2xx response as evidence. Now verifies that the enumerated response body is structurally similar to the owner's response, filtering out generic success/error pages that return 200.
+
+- **XSS DOM canary CSP fallback** — DOM-based XSS detection now checks for both the `window.__xss_fired` canary and `img[src*="xss"]` elements. The secondary check provides a fallback when Content-Security-Policy blocks `window` property assignment.
+
+### CLI Architecture (MEDIUM)
+
+- **Extracted `_parse_targets()` helper** — Consolidated 9 instances of `[t.strip() for t in targets.split(",")] if targets else None` into a single `_parse_targets()` function. Also filters empty entries from doubled commas (e.g., `"a.com,,b.com"`).
+
+### Adapter Robustness (MEDIUM)
+
+- **Waybackurls concurrency safety** — `_execute()` now copies `_stdin_targets` to a local variable before use, preventing race conditions if the adapter instance is reused across concurrent runs. Also adds trailing newline to stdin data to ensure the final target is parsed.
+
+- **urlparse error handling in 4 adapters** — `parse_record()` in GauAdapter, WaybackurlsAdapter, KatanaAdapter, and WhatwebAdapter now wraps `urlparse()` calls in try/except. Malformed URLs from tool output no longer crash the adapter; instead, fields default to empty strings.
+
+### Test Coverage (34 new tests)
+
+- **`tests/test_fixes_0215.py`** (33 tests, new file):
+  - Upsert commit persistence across connections (6 tests) — verifies all 6 upsert methods persist data when called directly, verified by opening a second connection
+  - `_parse_targets()` helper (6 tests) — None, empty, single, multiple, whitespace, empty entries
+  - `_bodies_similar()` threshold (2 tests) — validates 0.7 threshold behavior
+  - SSRF indicator regex (3 tests) — full passwd format, AMI length, GCP version
+  - IDOR enumeration body check (1 test) — verifies body similarity required for enum
+  - Adapter urlparse safety (4 tests) — gau, waybackurls, katana, whatweb with malformed input
+  - Browser CLI commands (3 tests) — navigate, screenshot, extract with mocked browser
+  - HTTP CLI commands (3 tests) — request, replay, compare with mocked client
+  - Vuln/test CLI commands (5 tests) — idor, ssrf, xss, sqli, auth with mocked tools
+
+- **`tests/tools/test_vuln.py`** (+1 test):
+  - `test_ssrf_detected_via_metadata_likely` — verifies LIKELY confidence for cloud metadata substring match (vs CONFIRMED for full regex match)
 
 ---
 

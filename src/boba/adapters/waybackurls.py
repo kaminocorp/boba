@@ -33,21 +33,29 @@ class WaybackurlsAdapter(BaseAdapter):
 
     async def _execute(self, cmd: list[str], config: AdapterConfig) -> SubprocessResult:
         """Override to pipe targets via stdin (waybackurls reads domains from stdin)."""
+        # Copy targets to local var to avoid race conditions if adapter is reused
+        targets = list(self._stdin_targets)
         return await run_subprocess(
             cmd,
             timeout_seconds=config.timeout_seconds,
             env_vars=config.env_vars if config.env_vars else None,
-            stdin_data="\n".join(self._stdin_targets),
+            stdin_data="\n".join(targets) + "\n",
         )
 
     def parse_record(self, raw: str) -> dict[str, Any]:
         url = raw.strip()
-        parsed = urlparse(url)
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            path = parsed.path
+            query = parsed.query
+        except Exception:
+            host, path, query = "", "", ""
         return {
             "url": url,
-            "host": parsed.hostname or "",
-            "path": parsed.path,
-            "query": parsed.query,
+            "host": host,
+            "path": path,
+            "query": query,
             "source": "waybackurls",
         }
 

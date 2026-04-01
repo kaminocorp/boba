@@ -102,6 +102,13 @@ def _parse_headers(header_list: list[str] | None) -> dict[str, str]:
     return headers
 
 
+def _parse_targets(targets: str | None) -> list[str] | None:
+    """Parse a comma-separated target string into a list, or None if empty."""
+    if not targets:
+        return None
+    return [t.strip() for t in targets.split(",") if t.strip()]
+
+
 # ═══════════════════ HUNT COMMANDS ═══════════════════
 
 hunt_app = typer.Typer(help="Hunt lifecycle management.")
@@ -287,7 +294,7 @@ def recon_hosts(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        target_list = _parse_targets(targets)
         result = asyncio.run(recon.hosts(manager.context, hunt, target_list))
         if fmt == "json":
             format_output(
@@ -326,7 +333,7 @@ def recon_ports(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        target_list = _parse_targets(targets)
         result = asyncio.run(recon.ports(manager.context, hunt, target_list, range_))
         if fmt == "json":
             format_output(
@@ -395,7 +402,7 @@ def recon_tech(
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
-        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        target_list = _parse_targets(targets)
         result = asyncio.run(recon.tech(manager.context, hunt, target_list))
         if fmt == "json":
             format_output(
@@ -450,7 +457,7 @@ def enum_directories(
         from boba.tools import enum
 
         hunt = manager.get(hunt_id)
-        ext_list = [e.strip() for e in extensions.split(",")] if extensions else None
+        ext_list = _parse_targets(extensions)
         result = asyncio.run(
             enum.directories(manager.context, hunt, url, wordlist, match_codes, ext_list)
         )
@@ -489,7 +496,7 @@ def enum_crawl(
         from boba.tools import enum
 
         hunt = manager.get(hunt_id)
-        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        target_list = _parse_targets(targets)
         result = asyncio.run(enum.crawl(manager.context, hunt, target_list, depth))
         if fmt == "json":
             format_output(
@@ -1067,7 +1074,7 @@ def scan_nuclei(
         from boba.tools import scan
 
         hunt = manager.get(hunt_id)
-        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        target_list = _parse_targets(targets)
         result = asyncio.run(
             scan.nuclei_scan(
                 manager.context,

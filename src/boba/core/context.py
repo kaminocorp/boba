@@ -421,6 +421,7 @@ class HuntContext:
                 last_seen_at = excluded.last_seen_at""",
             (hunt_id, subdomain, root_domain, sources_json, now, now, source),
         )
+        self._conn.commit()
 
     def upsert_host(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -464,6 +465,7 @@ class HuntContext:
                 now,
             ),
         )
+        self._conn.commit()
 
     def upsert_port(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -483,6 +485,7 @@ class HuntContext:
                 now,
             ),
         )
+        self._conn.commit()
 
     def upsert_url(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -522,6 +525,7 @@ class HuntContext:
                 source,
             ),
         )
+        self._conn.commit()
 
     def upsert_technology(
         self, hunt_id: str, host: str, tech: dict[str, Any], source: str = ""
@@ -563,6 +567,7 @@ class HuntContext:
                 source,
             ),
         )
+        self._conn.commit()
 
     def upsert_directory(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -594,6 +599,7 @@ class HuntContext:
                 now,
             ),
         )
+        self._conn.commit()
 
     def upsert_records(
         self, hunt_id: str, table: str, records: list[dict[str, Any]], source: str = ""

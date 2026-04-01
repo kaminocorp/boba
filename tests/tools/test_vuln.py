@@ -122,8 +122,8 @@ class TestIDOR:
 
 class TestSSRF:
     @pytest.mark.asyncio
-    async def test_ssrf_detected_via_metadata(self, sink):
-        """Cloud metadata content in response → SSRF confirmed."""
+    async def test_ssrf_detected_via_metadata_confirmed(self, sink):
+        """Full AWS metadata format in response → SSRF confirmed via regex."""
         client = HttpClient(sink)
         call_count = 0
 
@@ -132,7 +132,11 @@ class TestSSRF:
             call_count += 1
             url = kwargs.get("url", "")
             if "169.254.169.254" in url:
-                return _make_response(200, "ami-12345 instance-id i-abc", call_count)
+                return _make_response(
+                    200,
+                    'ami-0abcdef123456789\n"instanceId": "i-abc123"',
+                    call_count,
+                )
             return _make_response(200, "normal response", call_count)
 
         client.request = mock_request
@@ -143,6 +147,29 @@ class TestSSRF:
         )
         assert result.vulnerable is True
         assert result.confidence == Confidence.CONFIRMED
+
+    @pytest.mark.asyncio
+    async def test_ssrf_detected_via_metadata_likely(self, sink):
+        """Cloud metadata substring match (no regex hit) → SSRF likely."""
+        client = HttpClient(sink)
+        call_count = 0
+
+        async def mock_request(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            url = kwargs.get("url", "")
+            if "169.254.169.254" in url:
+                return _make_response(200, "instance-id hostname local-ipv4", call_count)
+            return _make_response(200, "normal response", call_count)
+
+        client.request = mock_request
+        result = await vuln.test_ssrf(
+            client,
+            url="https://app.example.com/proxy",
+            payloads=["http://169.254.169.254/latest/meta-data/"],
+        )
+        assert result.vulnerable is True
+        assert result.confidence == Confidence.LIKELY
 
     @pytest.mark.asyncio
     async def test_ssrf_not_vulnerable(self, sink):

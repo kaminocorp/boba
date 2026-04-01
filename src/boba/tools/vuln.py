@@ -180,12 +180,22 @@ async def test_idor(
             )
             request_ids.append(resp.request_id)
             if 200 <= resp.status_code < 400:
-                evidence.append({"enumerated_id": obj_id, "status": resp.status_code})
-                if not vulnerable:
+                # Verify this returns real data, not just a generic success page,
+                # by comparing with User A's response.
+                enum_body_similar = _bodies_similar(resp_a.body, resp.body)
+                evidence.append(
+                    {
+                        "enumerated_id": obj_id,
+                        "status": resp.status_code,
+                        "body_similar_to_owner": enum_body_similar,
+                    }
+                )
+                if enum_body_similar and not vulnerable:
                     vulnerable = True
                     confidence = Confidence.LIKELY
                     description = (
-                        f"User B ({session_b.name}) can enumerate object IDs on {endpoint}."
+                        f"User B ({session_b.name}) can enumerate object IDs on {endpoint} "
+                        f"and receives data similar to the owner's response."
                     )
 
     return VulnTestResult(
@@ -250,12 +260,14 @@ async def test_ssrf(
             # only appear if the server fetched an internal resource).
             # Use context-aware regex to reduce false positives from
             # product names or error messages containing indicator substrings.
+            # Patterns require structural context to avoid false positives from
+            # error messages (e.g. "root cause" matching "root:").
             ssrf_indicator_patterns = [
-                (r"root:[^:]*:\d+:\d+:", "passwd_entry"),  # /etc/passwd format
-                (r"/bin/(ba)?sh", "shell_path"),  # Shell binary path
-                (r"ami-[0-9a-f]{5,}", "aws_ami_id"),  # AWS AMI ID format
-                (r"instance-id\b", "aws_instance"),  # AWS metadata field
-                (r"computeMetadata/", "gcp_metadata"),  # GCP metadata path
+                (r"root:[^:]*:\d+:\d+:[^:]*:[^:]*:", "passwd_entry"),  # Full /etc/passwd line
+                (r"/bin/(ba)?sh\b", "shell_path"),  # Shell binary path (word boundary)
+                (r"ami-[0-9a-f]{8,}", "aws_ami_id"),  # AWS AMI ID (min 8 hex chars)
+                (r'"instanceId"\s*:', "aws_instance"),  # AWS JSON metadata field
+                (r"computeMetadata/v\d", "gcp_metadata"),  # GCP metadata path with version
             ]
             for pattern, indicator_type in ssrf_indicator_patterns:
                 if re.search(pattern, resp.body_text, re.IGNORECASE):
@@ -483,7 +495,12 @@ async def test_xss(
             for canary in xss_payloads.DOM_CANARY:
                 test_url = _inject_param(url, param_name, canary)
                 await browser.navigate(test_url)
-                fired = await browser.execute_js("() => window.__xss_fired === true")
+                # Check both canary flag and error-based detection (CSP may block
+                # window property assignment but allow error-based signals)
+                fired = await browser.execute_js(
+                    "() => window.__xss_fired === true || "
+                    "document.querySelector('img[src*=\"xss\"]') !== null"
+                )
                 if fired:
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
@@ -860,7 +877,7 @@ def _extract_json_keys(data: Any, prefix: str = "") -> set[str]:
     return keys
 
 
-def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> bool:
+def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> bool:
     """Check if two response bodies are similar enough to indicate same content.
 
     Uses exact comparison, then JSON-aware structural comparison for JSON bodies
