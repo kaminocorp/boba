@@ -107,8 +107,12 @@ class BaseAdapter(ABC):
     # ── Phase 4: Scope enforcement ──
 
     def pre_filter_targets(self, targets: list[str]) -> list[str]:
-        """Filter input targets against scope before execution."""
-        in_scope, _ = self._scope.filter_targets(targets, self.PRODUCES)
+        """Filter input targets against scope before execution.
+
+        Uses entity_type="auto" because input targets are always hostnames,
+        domains, or URLs — regardless of what the adapter PRODUCES as output.
+        """
+        in_scope, _ = self._scope.filter_targets(targets, "auto")
         return in_scope
 
     def post_filter_records(

@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.18](#0218--pre-v3-scope-pre-filter-fix) — Critical fix: `pre_filter_targets()` used `PRODUCES` as entity type, breaking 4 adapters (naabu, whatweb, ffuf, nuclei). Now uses `"auto"`. 6 new tests (421 total)
 - [0.2.17](#0217--pre-v3-parse-robustness--data-integrity) — Adapter type guards (6 adapters), BaseAdapter JSON_OBJECT non-dict fix, finding upsert flag preservation via `MAX()`, HttpClient response body size limit (50 MB), CLI cleanup logging, 1 new test file + 27 new tests (415 total)
 - [0.2.16](#0216--pre-v3-architecture-review) — Atomic batch upserts, PRAGMA validation, scope default-deny enforcement, browser context lock, CLI `_managed` context managers (41x dedup), SQLi false-condition baseline guard, 1 new test file + 27 new tests (388 total)
 - [0.2.15](#0215--v3-readiness-final-gate) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
@@ -19,6 +20,51 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.18 — Pre-V3 Scope Pre-Filter Fix
+
+**Date:** 2026-04-01
+**Scope:** 1 file fixed, 6 new tests, 421 tests passing (6 new, 0 regressions)
+
+5-agent parallel codebase review across all layers produced ~50 raw findings. After manual verification against actual code, 1 real critical bug survived triage — the rest were false alarms from overstated analysis (e.g., "session mutations not persisting" in a correct deep-copy→mutate→persist pattern, "race conditions" in single-threaded asyncio, "missing field validation" at internal boundaries where parse_record already guarantees fields). The single fix unblocks 4 of 10 adapters that were silently broken. Test count: 415 → 421.
+
+### Scope Pre-Filter Entity Type Mismatch (CRITICAL)
+
+- **`pre_filter_targets()` used `self.PRODUCES` as entity type for scope checking** — `BaseAdapter.pre_filter_targets()` passed `self.PRODUCES` (e.g., `"port"`, `"technology"`, `"directory"`, `"finding"`) to `ScopeEngine.filter_targets()` as the `entity_type`. The scope engine only recognizes `"subdomain"`, `"host"`, `"domain"`, `"url"`, `"ip"`, and `"auto"`. Unrecognized types fall through to `return False` (default-deny), causing **all input targets to be filtered out** before the tool ever runs. Now uses `"auto"` so the scope engine guesses the correct type from the target string (which is always a hostname, domain, IP, or URL — regardless of what the adapter produces as output).
+
+  **Affected adapters (all had `SCOPE_MODE="pre"`):**
+  - **naabu** (`PRODUCES="port"`) — port scanning never executed
+  - **whatweb** (`PRODUCES="technology"`) — tech fingerprinting never executed
+  - **ffuf** (`PRODUCES="directory"`) — directory fuzzing never executed
+  - **nuclei** (`PRODUCES="finding"`) — vulnerability scanning never executed
+
+  Adapters with recognized PRODUCES values were unaffected: subfinder (`"subdomain"`), httpx (`"host"`), gau/waybackurls/katana (`"url"`).
+
+### Test Coverage (6 new tests)
+
+- **`tests/adapters/test_base_adapter.py::TestPreFilterEntityType`** (6 tests):
+  - PRODUCES="port" keeps in-scope hosts, rejects out-of-scope (2 tests)
+  - PRODUCES="technology" keeps in-scope hosts (1 test)
+  - PRODUCES="directory" keeps in-scope URLs (1 test)
+  - PRODUCES="finding" keeps in-scope hosts (1 test)
+  - IP targets with PRODUCES="port" use auto-detection correctly (1 test)
+
+### Review Findings Triaged as False Alarms
+
+For transparency, these findings from the 5-agent review were investigated and determined to be non-issues:
+
+- **"Missing field validation in upsert_subdomain/url/port"** — Internal API: `parse_record()` guarantees required fields exist. Not a system boundary.
+- **"Database not thread-safe"** — asyncio is single-threaded cooperative. Already triaged in 0.2.17.
+- **"Race condition in browser request counting"** — asyncio dict increment within one coroutine step is atomic. Already triaged in 0.2.17.
+- **"Session mutations not persisting due to deep copy"** — The `_get_or_raise()` → deep copy → mutate → `_persist()` pattern correctly writes to both DB and cache.
+- **"JWT exception handling incomplete (missing binascii.Error, JSONDecodeError)"** — Both `binascii.Error` and `json.JSONDecodeError` inherit from `ValueError`, which is already caught.
+- **"SQLi payload concatenation prevents proper error detection"** — Appending payload to default value (e.g., `1'`) is standard SQLi testing practice, matching how sqlmap and Burp Intruder operate.
+- **"Boolean SQLi AND logic too strict"** — The AND condition (true matches baseline AND false differs) is the standard detection approach used by sqlmap.
+- **"JSON key Jaccard similarity wrong (should use intersection/one_set)"** — Jaccard index (intersection/union) is the standard set similarity metric by definition.
+- **"http.py body encoding failure unhandled"** — `str.encode("utf-8")` on Python strings always succeeds; Python `str` is always valid Unicode.
+- **"OOB domain parsing unsafe for domains without subdomains"** — Interactsh callback domains always have the listener ID as the first subdomain component by design.
 
 ---
 

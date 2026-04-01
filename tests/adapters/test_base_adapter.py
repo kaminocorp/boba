@@ -244,3 +244,118 @@ class TestTempFileLifecycle:
         # Should not raise
         adapter._cleanup_temp_files()
         assert len(adapter._temp_files) == 0
+
+
+# ── Pre-filter entity type ─────────────────────────────────────────
+
+
+def _make_adapter_with_produces(produces: str) -> BaseAdapter:
+    """Create an adapter with a specific PRODUCES value and SCOPE_MODE='pre'."""
+
+    class ProducesStub(BaseAdapter):
+        TOOL_NAME = "produces_stub"
+        BINARY_NAMES = ["produces_stub"]
+        SCOPE_MODE = "pre"
+
+        def __init__(self, scope: ScopeEngine, produces_val: str):
+            self.PRODUCES = produces_val
+            super().__init__(scope)
+
+        def install_hint(self) -> str:
+            return "pip install produces_stub"
+
+        def build_command(
+            self, targets: list[str], config: AdapterConfig
+        ) -> tuple[list[str], None]:
+            return ["produces_stub"], None
+
+        def parse_record(self, raw: dict[str, Any] | str) -> dict[str, Any]:
+            if isinstance(raw, str):
+                return {"value": raw}
+            return dict(raw)
+
+        def extract_scope_target(self, record: dict[str, Any]) -> str | None:
+            return record.get("value")
+
+    scope = ScopeEngine(
+        ScopeConfig(
+            rules=[
+                ScopeRule("*.example.com", ScopeRuleType.DOMAIN, ScopeAction.INCLUDE),
+            ]
+        )
+    )
+    return ProducesStub(scope=scope, produces_val=produces)
+
+
+class TestPreFilterEntityType:
+    """Verify that pre_filter_targets uses 'auto' entity detection,
+    not the adapter's PRODUCES value.
+
+    Before the fix, adapters with PRODUCES='port'/'technology'/'directory'/
+    'finding' would have ALL input targets filtered out because the scope
+    engine didn't recognize those entity types and returned False.
+    """
+
+    def test_pre_filter_with_produces_port(self):
+        """naabu-like adapter (PRODUCES='port') must keep in-scope hosts."""
+        adapter = _make_adapter_with_produces("port")
+        result = adapter.pre_filter_targets(["sub.example.com", "evil.com"])
+        assert "sub.example.com" in result
+        assert "evil.com" not in result
+
+    def test_pre_filter_with_produces_technology(self):
+        """whatweb-like adapter (PRODUCES='technology') must keep in-scope hosts."""
+        adapter = _make_adapter_with_produces("technology")
+        result = adapter.pre_filter_targets(["sub.example.com"])
+        assert result == ["sub.example.com"]
+
+    def test_pre_filter_with_produces_directory(self):
+        """ffuf-like adapter (PRODUCES='directory') must keep in-scope URLs."""
+        adapter = _make_adapter_with_produces("directory")
+        result = adapter.pre_filter_targets(["https://sub.example.com/path"])
+        assert len(result) == 1
+
+    def test_pre_filter_with_produces_finding(self):
+        """nuclei-like adapter (PRODUCES='finding') must keep in-scope hosts."""
+        adapter = _make_adapter_with_produces("finding")
+        result = adapter.pre_filter_targets(["sub.example.com", "other.example.com"])
+        assert len(result) == 2
+
+    def test_pre_filter_still_rejects_out_of_scope(self):
+        """Ensure out-of-scope targets are still rejected regardless of PRODUCES."""
+        adapter = _make_adapter_with_produces("port")
+        result = adapter.pre_filter_targets(["evil.com", "hacker.org"])
+        assert result == []
+
+    def test_pre_filter_with_ip_targets(self):
+        """IP targets should use auto-detection, not PRODUCES entity type."""
+        scope = ScopeEngine(
+            ScopeConfig(
+                rules=[
+                    ScopeRule("10.0.0.0/8", ScopeRuleType.IP_RANGE, ScopeAction.INCLUDE),
+                ]
+            )
+        )
+
+        class IPStub(BaseAdapter):
+            TOOL_NAME = "ip_stub"
+            BINARY_NAMES = ["ip_stub"]
+            PRODUCES = "port"
+            SCOPE_MODE = "pre"
+
+            def install_hint(self) -> str:
+                return ""
+
+            def build_command(self, targets, config):
+                return ["ip_stub"], None
+
+            def parse_record(self, raw):
+                return dict(raw) if isinstance(raw, dict) else {"value": raw}
+
+            def extract_scope_target(self, record):
+                return record.get("value")
+
+        adapter = IPStub(scope)
+        result = adapter.pre_filter_targets(["10.0.0.1", "192.168.1.1"])
+        assert "10.0.0.1" in result
+        assert "192.168.1.1" not in result
