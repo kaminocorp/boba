@@ -196,7 +196,8 @@ class ScopeEngine:
 
     @staticmethod
     def _guess_entity_type(target: str) -> str:
-        if "://" in target or "/" in target:
+        # Scheme present → definitely a URL
+        if "://" in target:
             return "url"
         # Strip brackets/port before attempting IP parse
         cleaned = target
@@ -206,11 +207,21 @@ class ScopeEngine:
                 cleaned = cleaned[1:bracket_end]
         elif cleaned.count(":") == 1:
             cleaned = cleaned.split(":")[0]
+        # Check for IP or CIDR (e.g. 10.0.0.0/24) before treating / as URL
+        try:
+            ipaddress.ip_network(cleaned if "/" not in cleaned else target, strict=False)
+            return "ip"
+        except ValueError:
+            pass
         try:
             ipaddress.ip_address(cleaned)
             return "ip"
         except ValueError:
-            return "subdomain"
+            pass
+        # Contains / but not an IP range → treat as URL path
+        if "/" in target:
+            return "url"
+        return "subdomain"
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> ScopeEngine:

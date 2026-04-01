@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 from typing import Any
 
 from boba.core.context import HuntContext
@@ -93,12 +94,13 @@ class SessionManager:
         page = await browser._get_page(session_name)
 
         for field_name, value in credentials.items():
-            # Try common selectors
+            # Try common selectors — escape field_name for CSS safety
+            safe_name = field_name.replace("\\", "\\\\").replace("'", "\\'")
             filled = False
             for selector in [
-                f"[name='{field_name}']",
-                f"#{field_name}",
-                f"[id='{field_name}']",
+                f"[name='{safe_name}']",
+                f"#{safe_name}",
+                f"[id='{safe_name}']",
             ]:
                 try:
                     await page.fill(selector, value)
@@ -166,10 +168,15 @@ class SessionManager:
         return dict(state.cookies)
 
     def get(self, session_name: str) -> SessionState | None:
-        """Get a session by name, or None if not found."""
+        """Get a session by name, or None if not found.
+
+        Returns a deep copy so callers cannot accidentally mutate cached state.
+        Internal methods use _get_or_raise which returns the cached reference.
+        """
         if session_name in self._cache:
-            return self._cache[session_name]
-        return self._load(session_name)
+            return copy.deepcopy(self._cache[session_name])
+        state = self._load(session_name)
+        return copy.deepcopy(state) if state else None
 
     def list_sessions(self) -> list[SessionState]:
         """List all sessions for this hunt."""

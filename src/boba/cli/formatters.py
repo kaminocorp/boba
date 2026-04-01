@@ -6,6 +6,7 @@ import json
 import sys
 from typing import Any
 
+import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -29,7 +30,7 @@ def format_output(
     """
     if fmt not in ("json", "table"):
         console.print(f"[red]Error: invalid format '{fmt}', must be 'json' or 'table'[/red]")
-        raise SystemExit(1)
+        raise typer.Exit(code=1)
     if fmt == "json":
         _print_json(data)
     else:

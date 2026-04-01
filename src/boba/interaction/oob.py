@@ -50,8 +50,8 @@ class OOBManager:
         if self._client and hasattr(self._client, "deregister"):
             try:
                 await self._client.deregister()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Error deregistering OOB client: %s", exc)
         self._client = None
         self._listeners.clear()
 
@@ -155,19 +155,20 @@ class OOBManager:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-        # Persist interactions
-        for interaction in all_interactions:
-            lid = interaction.get("listener_id")
-            if lid:
-                existing = self._context.get_oob_listeners(self._hunt_id)
-                for listener in existing:
-                    if listener["listener_id"] == lid:
-                        interactions = listener.get("interactions", [])
-                        interactions.append(interaction)
-                        self._context.update_oob_interactions(
-                            self._hunt_id, lid, interactions
-                        )
-                        break
+        # Persist interactions — fetch listeners once, index by ID
+        if all_interactions:
+            existing_listeners = {
+                rec["listener_id"]: rec
+                for rec in self._context.get_oob_listeners(self._hunt_id)
+            }
+            for interaction in all_interactions:
+                lid = interaction.get("listener_id")
+                if lid and lid in existing_listeners:
+                    prev = existing_listeners[lid].get("interactions", [])
+                    prev.append(interaction)
+                    self._context.update_oob_interactions(
+                        self._hunt_id, lid, prev
+                    )
 
         return all_interactions
 

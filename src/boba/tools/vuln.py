@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 import re
-from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
+from urllib.parse import quote, unquote, urlencode, urlparse, parse_qs, urlunparse
 
 from boba.core.models import (
     Confidence,
@@ -198,15 +198,15 @@ async def test_ssrf(
             )
             request_ids.append(resp.request_id)
 
-            # Check for signs of SSRF in response
+            # Check for strong SSRF indicators in response (content that could
+            # only appear if the server fetched an internal resource)
             body_lower = resp.body_text.lower()
-            ssrf_indicators = [
-                "root:", "/bin/bash",  # /etc/passwd
-                "ami-", "instance-id",  # AWS metadata
+            ssrf_confirmed_indicators = [
+                "root:", "/bin/bash",  # /etc/passwd content
+                "ami-", "instance-id",  # AWS metadata fields
                 "computeMetadata",  # GCP metadata
-                "internal server error",  # generic server-side error
             ]
-            for indicator in ssrf_indicators:
+            for indicator in ssrf_confirmed_indicators:
                 if indicator in body_lower:
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
@@ -219,16 +219,24 @@ async def test_ssrf(
                     })
                     break
 
-            # Check for status code anomalies (internal services returning different codes)
-            if not vulnerable and resp.status_code == 200 and "169.254.169.254" in payload:
-                vulnerable = True
-                confidence = Confidence.LIKELY
+            # Cloud metadata 200 check — always collect evidence even if
+            # already flagged, since metadata access is higher severity
+            if resp.status_code == 200 and "169.254.169.254" in payload:
+                if not vulnerable:
+                    vulnerable = True
+                    confidence = Confidence.LIKELY
                 evidence.append({
                     "payload": payload,
                     "param": param_name,
                     "note": "200 response for cloud metadata URL",
                     "request_id": resp.request_id,
                 })
+
+            # Stop testing this injection point once confirmed
+            if confidence == Confidence.CONFIRMED:
+                break
+        if confidence == Confidence.CONFIRMED:
+            break
 
     # OOB detection for blind SSRF
     if oob_manager and not vulnerable:
@@ -315,7 +323,10 @@ async def test_xss(
             )
             request_ids.append(resp.request_id)
 
-            # Check reflection — payload appears unescaped in response
+            # Check reflection — payload appears unescaped in response.
+            # Also check the URL-decoded form for encoding bypass payloads
+            # (servers typically decode parameters before reflecting).
+            decoded_payload = unquote(payload)
             if payload in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
@@ -327,10 +338,23 @@ async def test_xss(
                 })
                 break  # Found confirmed XSS for this param
 
+            if decoded_payload != payload and decoded_payload in resp.body_text:
+                vulnerable = True
+                confidence = Confidence.CONFIRMED
+                evidence.append({
+                    "type": "reflected_decoded",
+                    "payload": payload,
+                    "decoded": decoded_payload,
+                    "param": param_name,
+                    "request_id": resp.request_id,
+                })
+                break
+
             # Check for partial reflection: extract inner content between tags
             # e.g. "<script>alert(1)</script>" → check for "alert(1)"
+            # Use a 16-char minimum to avoid matching common JS snippets
             inner = re.sub(r"<[^>]*>", "", payload).strip()
-            if inner and len(inner) >= 8 and inner in resp.body_text:
+            if inner and len(inner) >= 16 and inner in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.POSSIBLE
                 evidence.append({
@@ -660,10 +684,6 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> boo
         return True
     if not body_a or not body_b:
         return False
-    # Exact content match via hash — fast path for large identical bodies
-    import hashlib
-    if hashlib.sha256(body_a).digest() == hashlib.sha256(body_b).digest():
-        return True
     # Length-ratio heuristic — bodies must be similar length AND share structural overlap
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
     if len_ratio <= threshold:

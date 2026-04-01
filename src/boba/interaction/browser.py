@@ -69,10 +69,16 @@ class BrowserManager:
         self._request_counts.clear()
 
         if self._browser:
-            await self._browser.close()
+            try:
+                await self._browser.close()
+            except Exception as exc:
+                logger.debug("Error closing browser: %s", exc)
             self._browser = None
         if self._playwright:
-            await self._playwright.stop()
+            try:
+                await self._playwright.stop()
+            except Exception as exc:
+                logger.debug("Error stopping Playwright: %s", exc)
             self._playwright = None
 
     async def __aenter__(self) -> BrowserManager:
@@ -302,6 +308,12 @@ class BrowserManager:
         page = await self._get_page(context_name)
         return await page.evaluate(script)
 
+    @staticmethod
+    def _escape_css_string(value: str) -> str:
+        """Escape a value for use inside a CSS attribute selector string."""
+        # Backslash-escape characters that break CSS selector strings
+        return value.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+
     async def fill_form(
         self,
         selector: str,
@@ -313,7 +325,8 @@ class BrowserManager:
         """Fill form fields and optionally submit."""
         page = await self._get_page(context_name)
         for field_name, value in values.items():
-            await page.fill(f"{selector} [name='{field_name}']", value)
+            safe_name = self._escape_css_string(field_name)
+            await page.fill(f"{selector} [name='{safe_name}']", value)
         if submit:
             await page.click(f"{selector} [type='submit']")
             await page.wait_for_load_state("networkidle", timeout=timeout_ms)

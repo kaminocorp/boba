@@ -32,7 +32,6 @@ TIME_BASED_MYSQL: list[str] = [
     "' AND SLEEP(5)--",
     "' OR SLEEP(5)--",
     "1' AND (SELECT SLEEP(5))--",
-    "'; WAITFOR DELAY '0:0:5'--",
 ]
 
 TIME_BASED_POSTGRES: list[str] = [

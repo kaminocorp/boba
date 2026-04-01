@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from boba.adapters.ffuf import FfufAdapter
 from boba.adapters.katana import KatanaAdapter
 from boba.core.context import HuntContext
@@ -23,7 +25,7 @@ async def directories(
 
     Automatically appends /FUZZ to the URL if not present.
     """
-    config = config or AdapterConfig()
+    config = copy.deepcopy(config) if config else AdapterConfig()
     if wordlist:
         config.extra_args_dict["wordlist"] = wordlist
     config.extra_args_dict["match_codes"] = match_codes
@@ -60,7 +62,7 @@ async def crawl(
             raw_stdout="", raw_stderr="", duration_seconds=0.0, records=[],
         )
 
-    config = config or AdapterConfig()
+    config = copy.deepcopy(config) if config else AdapterConfig()
     config.extra_args_dict["depth"] = depth
 
     scope = ScopeEngine(hunt.scope)

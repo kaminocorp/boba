@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import time
 from typing import Any
 
@@ -11,6 +12,11 @@ import httpx
 
 from boba.core.models import CompareResult, FuzzAttackType, FuzzResult, HttpResponse
 from boba.interaction.history import HttpHistorySink
+
+logger = logging.getLogger(__name__)
+
+# Safety cap for fuzz combinations to prevent accidental OOM
+MAX_FUZZ_COMBINATIONS = 100_000
 
 # Marker for fuzz injection positions
 FUZZ_MARKER = "§"
@@ -322,11 +328,22 @@ class HttpClient:
             ]
 
         elif attack_type == FuzzAttackType.CLUSTER_BOMB:
-            # Cartesian product
+            # Cartesian product — cap to prevent accidental OOM
             payload_lists = [payloads.get(pos, [""]) for pos in positions]
-            return [
-                dict(zip(positions, vals))
-                for vals in itertools.product(*payload_lists)
-            ]
+            total = 1
+            for pl in payload_lists:
+                total *= max(len(pl), 1)
+            if total > MAX_FUZZ_COMBINATIONS:
+                logger.warning(
+                    "Cluster bomb would generate %d combinations (cap: %d). "
+                    "Truncating to first %d.",
+                    total, MAX_FUZZ_COMBINATIONS, MAX_FUZZ_COMBINATIONS,
+                )
+            combos = []
+            for vals in itertools.product(*payload_lists):
+                combos.append(dict(zip(positions, vals)))
+                if len(combos) >= MAX_FUZZ_COMBINATIONS:
+                    break
+            return combos
 
         return []

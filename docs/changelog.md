@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.7](#027--pre-v3-final-quality-gate) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
 - [0.2.6](#026--final-review--pre-v3-readiness) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
 - [0.2.5](#025--pre-v3-quality-gate) — Subprocess exit code fix, scope URL bypass fix, OOB warning, adapter exit code logging, browser timing, compare bytes
 - [0.2.4](#024--operational-robustness) — Persistent HTTP client, body_text truncation fix, diagnostic logging, SQLi baseline fix
@@ -8,6 +9,32 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.7 — Pre-V3 Final Quality Gate
+
+**Date:** 2026-03-31
+**Scope:** 14 files modified, 116 tests passing (0 regressions)
+**Details:** [v1v2-pre-v3-final-gate.md](completions/v1v2-pre-v3-final-gate.md)
+
+5-agent parallel codebase review uncovered 1 critical bug, 7 high-priority issues, and 7 medium-priority fixes surviving all prior hardening rounds. Score: 6.5/10 → 8.5/10.
+
+- **`_safe_close()` infinite recursion fixed** — helper called itself instead of `manager.close_context()`, leaking SQLite connections on every CLI invocation
+- **`SystemExit(1)` → `typer.Exit(code=1)`** — invalid `--format` no longer bypasses Typer's `finally` blocks
+- **SSRF false positives eliminated** — removed generic "internal server error" from confirmed indicators; evidence collection no longer halted by early false match; break after confirmed
+- **XSS decoded reflection check** — URL-encoded payloads now also checked in decoded form; partial reflection threshold tightened (8→16 chars)
+- **OOB poll O(n*m) → O(n+m)** — listeners fetched once before interaction loop, not per-interaction
+- **SessionState `get()` returns deepcopy** — callers can no longer accidentally mutate cached session state
+- **Cluster bomb capped at 100K combinations** — prevents accidental OOM from Cartesian product explosion
+- **CSS selector injection fixed** — field names escaped in `fill_form()` and `login_form()` before CSS interpolation
+- **Scope CIDR classification fixed** — `10.0.0.0/24` no longer misclassified as URL
+- **`enum.py` config mutation prevented** — caller-provided configs are deepcopied before mutation
+- **SSRF `PROTOCOL_SMUGGLE` added to `ALL`** — `file:///etc/passwd` now tested by default
+- **SQLi MSSQL payload removed from MySQL list** — eliminates duplicate request
+- **Body file path traversal validation** — `get_full_body()` validates path is within body directory
+- **Browser `stop()` exception-safe** — browser/playwright close failures no longer prevent each other
+- **Dead hash comparison removed** from `_bodies_similar`
 
 ---
 

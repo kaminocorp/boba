@@ -195,18 +195,22 @@ class TestXSS:
         """Payload inner content reflected but tags escaped → POSSIBLE XSS."""
         client = HttpClient(sink)
         call_count = 0
+        # Use a longer inner content (≥16 chars) to avoid matching common JS snippets
+        inner = "alert(document.cookie)"
 
         async def mock_request(**kwargs):
             nonlocal call_count
             call_count += 1
-            return _make_response(200, "<p>Search: &lt;script&gt;alert(1)&lt;/script&gt;</p>", call_count)
+            return _make_response(
+                200, f"<p>Search: {inner}</p>", call_count
+            )
 
         client.request = mock_request
         result = await vuln.test_xss(
             client,
             url="https://app.example.com/search",
             params={"q": "test"},
-            payloads=["<script>alert(1)</script>"],
+            payloads=[f"<script>{inner}</script>"],
         )
         assert result.vulnerable is True
         assert result.confidence == Confidence.POSSIBLE

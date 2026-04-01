@@ -141,7 +141,14 @@ class HttpHistorySink:
         ref_path = record.get(ref_field)
         if ref_path:
             path = Path(ref_path)
-            if path.exists():
+            # Validate the path is within our expected body directory
+            try:
+                body_dir = self._get_body_dir()
+                path.resolve().relative_to(body_dir.resolve())
+            except (ValueError, OSError):
+                logger.warning("Body file path %s is outside body directory, skipping", ref_path)
+                ref_path = None
+            if ref_path and path.exists():
                 return path.read_bytes()
 
         # Fall back to inline

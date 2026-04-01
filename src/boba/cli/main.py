@@ -37,7 +37,7 @@ def _get_manager(data_dir: Path | None = None):
 def _safe_close(manager) -> None:
     """Close manager context without masking the original exception."""
     try:
-        _safe_close(manager)
+        manager.close_context()
     except Exception:
         pass
 
