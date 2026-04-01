@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from boba.adapters.nuclei import NucleiAdapter
 from boba.core.context import HuntContext
 from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
+
+logger = logging.getLogger(__name__)
 
 
 async def nuclei_scan(

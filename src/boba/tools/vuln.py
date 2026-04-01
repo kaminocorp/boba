@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 import re
 from urllib.parse import quote, unquote, urlencode, urlparse, parse_qs, urlunparse
@@ -18,6 +19,14 @@ from boba.payloads import sqli as sqli_payloads
 from boba.payloads import ssrf as ssrf_payloads
 from boba.payloads import xss as xss_payloads
 from boba.payloads import auth as auth_payloads
+
+logger = logging.getLogger(__name__)
+
+# Pre-compiled regex for admin-like endpoint detection (path-boundary matching)
+_ADMIN_RE = re.compile(r"/(admin|manage|internal|superuser)([/?#]|$)", re.IGNORECASE)
+
+# Regex matching JSON structural-only lines (braces, brackets, commas)
+_JSON_STRUCTURAL_RE = re.compile(rb"^\s*[\[\]{},]*\s*$")
 
 
 def _inject_param(url: str, param_name: str, value: str) -> str:
@@ -573,14 +582,19 @@ async def test_sqli(
 
         # If true/false conditions produce different response lengths, likely SQLi.
         # Use both absolute and relative thresholds to catch small and large responses.
+        # Guard: the true-condition response must be similar to the baseline to confirm
+        # the true payload "passes through" — otherwise dynamic content (ads, CSRF
+        # tokens, timestamps) can cause natural length variance that triggers FPs.
         len_diff = abs(len(resp_true.body) - len(resp_false.body))
         baseline_len = max(len(resp_baseline.body), 1)
         relative_diff = len_diff / baseline_len
+        true_matches_baseline = _bodies_similar(resp_true.body, resp_baseline.body)
         if (
             resp_true.status_code == resp_false.status_code
             and (len_diff >= 20 or relative_diff >= 0.05)
             and len_diff > 0
             and resp_true.status_code == resp_baseline.status_code
+            and true_matches_baseline
         ):
             vulnerable = True
             confidence = Confidence.LIKELY
@@ -751,9 +765,9 @@ async def test_auth(
                     )
                     break
 
-        except (ValueError, KeyError, IndexError):
+        except (ValueError, KeyError, IndexError) as exc:
             # Invalid JWT format — skip JWT tests
-            pass
+            logger.debug("JWT manipulation skipped for %s: %s", endpoint, exc)
 
     # Test 3: With valid session but accessing admin-like endpoints
     if session and not vulnerable:
@@ -769,9 +783,6 @@ async def test_auth(
         request_ids.append(resp_auth.request_id)
 
         # If regular user can access, check if it looks like an admin endpoint
-        # Use regex with path-boundary matching to avoid false positives
-        # like /gadmin or /read-admin-guide
-        _ADMIN_RE = re.compile(r"/(admin|manage|internal|superuser)([/?#]|$)", re.IGNORECASE)
         if 200 <= resp_auth.status_code < 400:
             if _ADMIN_RE.search(endpoint):
                 vulnerable = True
@@ -810,6 +821,10 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> boo
     Uses both exact content hash comparison and length-ratio heuristic.
     This prevents false positives from two different resources that happen
     to be the same length.
+
+    JSON structural lines (braces, brackets, commas) are excluded from the
+    overlap calculation to avoid false positives on same-shape JSON with
+    different values (e.g., /api/me returning per-user data).
     """
     if body_a == body_b:
         return True
@@ -819,9 +834,11 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> boo
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
     if len_ratio < threshold:
         return False
-    # Check for structural overlap: shared lines as a fraction of total unique lines
-    lines_a = set(body_a.split(b"\n"))
-    lines_b = set(body_b.split(b"\n"))
+    # Check for structural overlap: shared lines as a fraction of total unique lines.
+    # Exclude JSON structural-only lines (braces, brackets) that inflate overlap
+    # on same-shape JSON responses with different values.
+    lines_a = {ln for ln in body_a.split(b"\n") if not _JSON_STRUCTURAL_RE.match(ln)}
+    lines_b = {ln for ln in body_b.split(b"\n") if not _JSON_STRUCTURAL_RE.match(ln)}
     if not lines_a or not lines_b:
         return len_ratio > threshold
     overlap = len(lines_a & lines_b) / max(len(lines_a | lines_b), 1)

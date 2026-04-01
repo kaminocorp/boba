@@ -265,8 +265,21 @@ class HttpClient:
         combinations = self._generate_combinations(positions, payloads, attack_type)
 
         results: list[dict[str, Any]] = []
-        baseline_status = 0
-        baseline_length = 0
+
+        # Send an unfuzzed baseline request first — using the first payload as
+        # baseline can give skewed results if the first payload triggers an anomaly.
+        baseline_resp = await self.request(
+            method=method,
+            url=url,
+            headers=headers,
+            body=body,
+            cookies=cookies,
+            source="fuzz",
+            session_name=session_name,
+            tags=["fuzz", "baseline"],
+        )
+        baseline_status = baseline_resp.status_code
+        baseline_length = len(baseline_resp.body)
 
         for i, combo in enumerate(combinations):
             # Apply payloads to template (url, body, and headers)
@@ -303,11 +316,6 @@ class HttpClient:
                 "request_id": resp.request_id,
             }
             results.append(entry)
-
-            # First result is baseline
-            if i == 0:
-                baseline_status = resp.status_code
-                baseline_length = len(resp.body)
 
             # Rate limiting
             if rate_limit > 0 and i < len(combinations) - 1:

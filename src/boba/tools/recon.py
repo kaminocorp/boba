@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 
 from boba.adapters.gau import GauAdapter
@@ -85,7 +86,7 @@ async def ports(
     if not targets:
         return _empty_result("naabu")
 
-    config = config or AdapterConfig()
+    config = copy.deepcopy(config) if config else AdapterConfig()
     if port_range:
         config.extra_args_dict["ports"] = port_range
 
@@ -122,6 +123,7 @@ async def urls(
     )
 
     all_records: list[dict] = []
+    seen_urls: set[str] = set()
     total_filtered = 0
     max_duration = 0.0
 
@@ -131,7 +133,12 @@ async def urls(
             continue
         context.upsert_records(hunt.id, "url", result.records, source=name)
         context.log_tool_run(hunt.id, result)
-        all_records.extend(result.records)
+        # Deduplicate by URL across adapters
+        for rec in result.records:
+            url_key = rec.get("url", "")
+            if url_key not in seen_urls:
+                seen_urls.add(url_key)
+                all_records.append(rec)
         total_filtered += result.filtered_count
         max_duration = max(max_duration, result.duration_seconds)
 

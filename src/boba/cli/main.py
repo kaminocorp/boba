@@ -793,6 +793,8 @@ def http_request(
             "body_preview": resp.body_text[:500],
         }
         format_output(data, fmt=fmt, title="HTTP Response")
+    except typer.Exit:
+        raise
     except Exception as e:
         print_error(str(e))
         raise typer.Exit(1)
@@ -847,6 +849,8 @@ def http_replay(
             "parent_request_id": request_id,
         }
         format_output(data, fmt=fmt, title="Replay Result")
+    except typer.Exit:
+        raise
     except Exception as e:
         print_error(str(e))
         raise typer.Exit(1)

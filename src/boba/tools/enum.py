@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+import logging
 
 from boba.adapters.ffuf import FfufAdapter
 from boba.adapters.katana import KatanaAdapter
 from boba.core.context import HuntContext
 from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
+
+logger = logging.getLogger(__name__)
 
 
 async def directories(

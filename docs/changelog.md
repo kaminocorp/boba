@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.13](#0213--another-v3-readiness-audit) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
 - [0.2.12](#0212--another-v3-readiness-review) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
 - [0.2.11](#0211--pre-v3-quality-gate--test-coverage) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
 - [0.2.10](#0210--v3-readiness-final-quality-pass) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
@@ -14,6 +15,50 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.13 — Another V3 Readiness Audit
+
+**Date:** 2026-04-01
+**Scope:** 10 files fixed, 1 test file expanded, 286 tests passing (21 new, 0 regressions)
+
+5-agent parallel codebase review across all layers. Found 0 critical, 4 high, and 10 medium issues surviving all prior hardening rounds (0.2.1–0.2.12). All fixes are strictly additive. Test count: 265 → 286.
+
+### Detection Accuracy (HIGH)
+
+- **IDOR `_bodies_similar` false-positive on same-shape JSON** — Structural-only lines (braces, brackets, commas) inflated overlap score, causing two JSON responses with identical keys but different values (e.g., `/api/me` per-user data) to be falsely flagged as similar. Now excludes JSON structural lines from the overlap calculation via compiled regex.
+- **Boolean-based SQLi false-positive on dynamic pages** — The 20-byte / 5% length-diff threshold triggered on pages with natural length variance (ads, CSRF tokens, timestamps). Added baseline similarity guard: the true-condition response body must be similar to the baseline before flagging, confirming the true payload actually "passes through."
+
+### Safety & Correctness (MEDIUM)
+
+- **`gau` targets ARG_MAX risk** — Targets were passed as positional CLI arguments, risking OS argument length limits with large target lists. Now writes targets to a temp file and passes via `--fp` flag.
+- **`post_filter_records` empty-string scope targets silently dropped** — Empty-string targets (`""`) were treated as falsy and removed, while `None` targets were kept. Now treats both consistently: empty-string and `None` both result in keeping the record.
+- **Fuzz baseline was first payload** — If the first fuzz payload triggered an anomalous response, all subsequent normal responses were flagged as anomalies. Now sends an unfuzzed baseline request before the fuzz loop.
+- **`session.login_form` accessed private `browser._get_page()`** — Broke encapsulation. Added public `BrowserManager.get_page()` method; `login_form` now uses the public API.
+- **`urls()` returned duplicate records** — `all_records` list from gau + waybackurls contained cross-adapter duplicates. Now deduplicates by URL before returning in the merged `ToolResult`.
+- **`ports()` mutated caller's `config.extra_args_dict`** — Unlike `enum.py` which uses `copy.deepcopy(config)`, `ports()` mutated the original. Now deepcopies the config before modification.
+- **`_ADMIN_RE` compiled on every `test_auth()` call** — Regex was defined inside the function body. Moved to module-level compiled constant.
+
+### Robustness (MEDIUM)
+
+- **Consistent `except typer.Exit: raise` across CLI** — `http request` and `http replay` commands raised `typer.Exit(1)` on invalid `--header` format inside the try block, but lacked the `except typer.Exit: raise` guard before the generic `except Exception`, causing double error printing. Added the guard to match the pattern in `session create` and `test idor`.
+- **Added `logging.getLogger(__name__)` to `vuln.py`, `enum.py`, `scan.py`** — These tool modules had no logger. JWT manipulation failures in `test_auth()` were silently swallowed; now logged at debug level.
+
+### Test Coverage (21 new tests)
+
+- **`tests/cli/test_cli.py`** (+21 tests):
+  - `TestReconSubdomainsCLI` (2 tests) — table + JSON output with mocked tool
+  - `TestReconHostsCLI` (2 tests) — with targets (verifies comma-split) + without targets (verifies None passthrough)
+  - `TestReconPortsCLI` (2 tests) — with targets + without targets (None passthrough)
+  - `TestReconUrlsCLI` (1 test) — domain flag with mocked tool
+  - `TestReconTechCLI` (2 tests) — with targets + without targets
+  - `TestEnumDirectoriesCLI` (2 tests) — table + JSON output
+  - `TestScanNucleiCLI` (3 tests) — with targets + without targets (None passthrough) + JSON format
+  - `TestSessionCreateCLI` (3 tests) — create + invalid method error + JSON format
+  - `TestSessionListCLI` (2 tests) — empty + after create
+  - `TestSessionDeleteCLI` (1 test) — create then delete
+  - `TestHttpHeaderValidation` (1 test) — invalid header format exits with error
 
 ---
 

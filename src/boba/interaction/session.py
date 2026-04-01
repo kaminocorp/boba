@@ -91,7 +91,7 @@ class SessionManager:
         await browser.navigate(login_url, context_name=session_name)
 
         # Fill and submit the login form
-        page = await browser._get_page(session_name)
+        page = await browser.get_page(session_name)
 
         for field_name, value in credentials.items():
             # Try common selectors — escape field_name for CSS safety

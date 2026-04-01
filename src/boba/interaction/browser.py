@@ -176,11 +176,14 @@ class BrowserManager:
 
         page.on("response", _on_response)
 
-    async def _get_page(self, context_name: str) -> Any:
+    async def get_page(self, context_name: str) -> Any:
         """Get the page for a context, creating context if needed."""
         if context_name not in self._pages:
             await self.get_or_create_context(context_name)
         return self._pages[context_name]
+
+    # Keep private alias for internal callers during transition
+    _get_page = get_page
 
     async def navigate(
         self,

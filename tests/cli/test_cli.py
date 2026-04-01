@@ -4,12 +4,28 @@ from __future__ import annotations
 
 import json
 import re
+from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
 
 from boba.cli.main import app
+from boba.core.models import ToolResult
 
 runner = CliRunner()
+
+
+def _make_result(tool_name: str, records: list[dict]) -> ToolResult:
+    """Build a fake ToolResult for mocking tool functions."""
+    return ToolResult(
+        tool_name=tool_name,
+        command=[tool_name],
+        exit_code=0,
+        raw_stdout="",
+        raw_stderr="",
+        duration_seconds=1.0,
+        records=records,
+        filtered_count=0,
+    )
 
 
 def _create_hunt(tmp_path: str, name: str = "Test Hunt") -> str:
@@ -508,3 +524,364 @@ class TestContextSessions:
         data = json.loads(result.output)
         assert isinstance(data, list)
         assert any(r["name"] == "user-session" for r in data)
+
+
+# ═══════════════════ RECON CLI TESTS ═══════════════════
+
+
+class TestReconSubdomainsCLI:
+    def test_recon_subdomains(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"subdomain": "api.example.com", "source": "subfinder"}]
+        mock_fn = AsyncMock(return_value=_make_result("subfinder", records))
+        with patch("boba.tools.recon.subdomains", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "subdomains", hunt_id,
+                    "--domain", "example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        assert "api.example.com" in result.output
+
+    def test_recon_subdomains_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"subdomain": "web.example.com", "source": "subfinder"}]
+        mock_fn = AsyncMock(return_value=_make_result("subfinder", records))
+        with patch("boba.tools.recon.subdomains", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "subdomains", hunt_id,
+                    "--domain", "example.com",
+                    "--format", "json",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["found"] == 1
+
+
+class TestReconHostsCLI:
+    def test_recon_hosts_with_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"host": "api.example.com", "status_code": 200, "source": "httpx"}]
+        mock_fn = AsyncMock(return_value=_make_result("httpx", records))
+        with patch("boba.tools.recon.hosts", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "hosts", hunt_id,
+                    "--targets", "api.example.com,web.example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        # Verify comma-split targets were passed correctly
+        call_args = mock_fn.call_args
+        targets_arg = call_args[1].get("targets") or call_args[0][2]
+        assert targets_arg == ["api.example.com", "web.example.com"]
+
+    def test_recon_hosts_no_targets(self, tmp_path):
+        """When --targets is omitted, None is passed to the tool (pulls from context)."""
+        hunt_id = _create_hunt(tmp_path)
+        mock_fn = AsyncMock(return_value=_make_result("httpx", []))
+        with patch("boba.tools.recon.hosts", mock_fn):
+            result = runner.invoke(
+                app,
+                ["recon", "hosts", hunt_id, "--data-dir", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        call_args = mock_fn.call_args
+        targets_arg = call_args[1].get("targets") or call_args[0][2]
+        assert targets_arg is None
+
+
+class TestReconPortsCLI:
+    def test_recon_ports_with_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"host": "api.example.com", "port": 443, "protocol": "tcp"}]
+        mock_fn = AsyncMock(return_value=_make_result("naabu", records))
+        with patch("boba.tools.recon.ports", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "ports", hunt_id,
+                    "--targets", "api.example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+
+    def test_recon_ports_no_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mock_fn = AsyncMock(return_value=_make_result("naabu", []))
+        with patch("boba.tools.recon.ports", mock_fn):
+            result = runner.invoke(
+                app,
+                ["recon", "ports", hunt_id, "--data-dir", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        call_args = mock_fn.call_args
+        targets_arg = call_args[1].get("targets") or call_args[0][2]
+        assert targets_arg is None
+
+
+class TestReconUrlsCLI:
+    def test_recon_urls(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"url": "https://example.com/login", "source": "gau"}]
+        mock_fn = AsyncMock(return_value=_make_result("recon.urls", records))
+        with patch("boba.tools.recon.urls", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "urls", hunt_id,
+                    "--domain", "example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+
+
+class TestReconTechCLI:
+    def test_recon_tech_with_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"host": "example.com", "technologies": [{"name": "nginx", "version": "1.19"}]}]
+        mock_fn = AsyncMock(return_value=_make_result("whatweb", records))
+        with patch("boba.tools.recon.tech", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon", "tech", hunt_id,
+                    "--targets", "https://example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        assert "nginx" in result.output
+
+    def test_recon_tech_no_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mock_fn = AsyncMock(return_value=_make_result("whatweb", []))
+        with patch("boba.tools.recon.tech", mock_fn):
+            result = runner.invoke(
+                app,
+                ["recon", "tech", hunt_id, "--data-dir", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+
+
+# ═══════════════════ ENUM CLI TESTS ═══════════════════
+
+
+class TestEnumDirectoriesCLI:
+    def test_enum_directories(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [
+            {"url": "https://example.com/admin", "status_code": 200, "content_length": 500}
+        ]
+        mock_fn = AsyncMock(return_value=_make_result("ffuf", records))
+        with patch("boba.tools.enum.directories", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "enum", "directories", hunt_id,
+                    "--url", "https://example.com/FUZZ",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+
+    def test_enum_directories_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"url": "https://example.com/secret", "status_code": 403}]
+        mock_fn = AsyncMock(return_value=_make_result("ffuf", records))
+        with patch("boba.tools.enum.directories", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "enum", "directories", hunt_id,
+                    "--url", "https://example.com/FUZZ",
+                    "--format", "json",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["found"] == 1
+
+
+# ═══════════════════ SCAN CLI TESTS ═══════════════════
+
+
+class TestScanNucleiCLI:
+    def test_scan_nuclei_with_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [
+            {
+                "template_id": "cve-2021-1234",
+                "severity": "high",
+                "url": "https://example.com",
+                "template_name": "Test CVE",
+            }
+        ]
+        mock_fn = AsyncMock(return_value=_make_result("nuclei", records))
+        with patch("boba.tools.scan.nuclei_scan", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "scan", "nuclei", hunt_id,
+                    "--targets", "https://example.com",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+
+    def test_scan_nuclei_no_targets(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mock_fn = AsyncMock(return_value=_make_result("nuclei", []))
+        with patch("boba.tools.scan.nuclei_scan", mock_fn):
+            result = runner.invoke(
+                app,
+                ["scan", "nuclei", hunt_id, "--data-dir", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        call_args = mock_fn.call_args
+        targets_arg = call_args[1].get("targets") or call_args[0][2]
+        assert targets_arg is None
+
+    def test_scan_nuclei_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [{"template_id": "exposed-env", "severity": "medium", "url": "https://e.com"}]
+        mock_fn = AsyncMock(return_value=_make_result("nuclei", records))
+        with patch("boba.tools.scan.nuclei_scan", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "scan", "nuclei", hunt_id,
+                    "--targets", "https://e.com",
+                    "--format", "json",
+                    "--data-dir", str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["found"] == 1
+
+
+# ═══════════════════ SESSION CLI TESTS ═══════════════════
+
+
+class TestSessionCreateCLI:
+    def test_session_create(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "session", "create", hunt_id,
+                "--name", "attacker",
+                "--target", "https://example.com",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "attacker" in result.output
+
+    def test_session_create_invalid_method(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "session", "create", hunt_id,
+                "--name", "test",
+                "--target", "https://example.com",
+                "--method", "invalid_method",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 1
+
+    def test_session_create_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "session", "create", hunt_id,
+                "--name", "owner",
+                "--target", "https://example.com",
+                "--format", "json",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "owner"
+
+
+class TestSessionListCLI:
+    def test_session_list_empty(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0
+
+    def test_session_list_after_create(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        runner.invoke(
+            app,
+            [
+                "session", "create", hunt_id,
+                "--name", "my-session",
+                "--target", "https://example.com",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        result = runner.invoke(
+            app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0
+        assert "my-session" in result.output
+
+
+class TestSessionDeleteCLI:
+    def test_session_delete(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        runner.invoke(
+            app,
+            [
+                "session", "create", hunt_id,
+                "--name", "to-delete",
+                "--target", "https://example.com",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        result = runner.invoke(
+            app, ["session", "delete", hunt_id, "to-delete", "--data-dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0
+        assert "deleted" in result.output.lower()
+
+
+# ═══════════════════ HTTP HEADER VALIDATION ═══════════════════
+
+
+class TestHttpHeaderValidation:
+    def test_invalid_header_format(self, tmp_path):
+        """Headers without colon should produce an error, not be silently caught."""
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "http", "request", hunt_id,
+                "--url", "https://example.com",
+                "--header", "BadHeader",
+                "--data-dir", str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "KEY:VALUE" in result.output
