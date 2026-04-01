@@ -290,12 +290,26 @@ class HuntContext:
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._in_transaction = False
+
+        result = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        if result[0].upper() != "WAL":
+            logger.warning("Failed to enable WAL mode; got %s", result[0])
+
         self._conn.execute("PRAGMA foreign_keys=ON")
+        fk = self._conn.execute("PRAGMA foreign_keys").fetchone()
+        if not fk[0]:
+            logger.warning("Failed to enable foreign_keys")
+
         self._create_tables()
 
     def _create_tables(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
+
+    def _maybe_commit(self) -> None:
+        """Commit unless inside a batch transaction (upsert_records)."""
+        if not self._in_transaction:
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -421,7 +435,7 @@ class HuntContext:
                 last_seen_at = excluded.last_seen_at""",
             (hunt_id, subdomain, root_domain, sources_json, now, now, source),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_host(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -465,7 +479,7 @@ class HuntContext:
                 now,
             ),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_port(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -485,7 +499,7 @@ class HuntContext:
                 now,
             ),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_url(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -525,7 +539,7 @@ class HuntContext:
                 source,
             ),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_technology(
         self, hunt_id: str, host: str, tech: dict[str, Any], source: str = ""
@@ -567,7 +581,7 @@ class HuntContext:
                 source,
             ),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_directory(self, hunt_id: str, record: dict[str, Any]) -> None:
         now = _now()
@@ -599,7 +613,7 @@ class HuntContext:
                 now,
             ),
         )
-        self._conn.commit()
+        self._maybe_commit()
 
     def upsert_records(
         self, hunt_id: str, table: str, records: list[dict[str, Any]], source: str = ""
@@ -620,9 +634,13 @@ class HuntContext:
         fn = dispatch.get(table)
         if not fn:
             raise ValueError(f"Unknown table: {table}")
-        with self._conn:
-            for record in records:
-                fn(record)
+        self._in_transaction = True
+        try:
+            with self._conn:
+                for record in records:
+                    fn(record)
+        finally:
+            self._in_transaction = False
 
     # ═══════════════════ QUERIES ═══════════════════
 

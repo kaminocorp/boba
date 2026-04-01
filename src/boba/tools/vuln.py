@@ -629,19 +629,22 @@ async def test_sqli(
 
         # If true/false conditions produce different response lengths, likely SQLi.
         # Use both absolute and relative thresholds to catch small and large responses.
-        # Guard: the true-condition response must be similar to the baseline to confirm
-        # the true payload "passes through" — otherwise dynamic content (ads, CSRF
-        # tokens, timestamps) can cause natural length variance that triggers FPs.
+        # Guards: (1) true-condition must match baseline (true payload "passes through"),
+        # (2) false-condition must NOT match baseline (false payload causes different
+        # output). Without both guards, dynamic content (ads, CSRF tokens, timestamps)
+        # can cause natural length variance that triggers false positives.
         len_diff = abs(len(resp_true.body) - len(resp_false.body))
         baseline_len = max(len(resp_baseline.body), 1)
         relative_diff = len_diff / baseline_len
         true_matches_baseline = _bodies_similar(resp_true.body, resp_baseline.body)
+        false_matches_baseline = _bodies_similar(resp_false.body, resp_baseline.body)
         if (
             resp_true.status_code == resp_false.status_code
             and (len_diff >= 20 or relative_diff >= 0.05)
             and len_diff > 0
             and resp_true.status_code == resp_baseline.status_code
             and true_matches_baseline
+            and not false_matches_baseline
         ):
             vulnerable = True
             confidence = Confidence.LIKELY

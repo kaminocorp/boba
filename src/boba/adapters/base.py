@@ -120,7 +120,12 @@ class BaseAdapter(ABC):
         for record in records:
             target_value = self.extract_scope_target(record)
             if target_value is None or target_value == "":
-                kept.append(record)  # can't determine scope target, keep it
+                logger.debug(
+                    "[%s] Dropping record with unmappable scope target (default-deny): %s",
+                    self.TOOL_NAME,
+                    {k: str(v)[:80] for k, v in record.items()} if record else record,
+                )
+                removed += 1
             elif self._scope.is_in_scope(target_value):
                 kept.append(record)
             else:

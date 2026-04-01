@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.16](#0216--pre-v3-architecture-review) — Atomic batch upserts, PRAGMA validation, scope default-deny enforcement, browser context lock, CLI `_managed` context managers (41x dedup), SQLi false-condition baseline guard, 1 new test file + 27 new tests (388 total)
 - [0.2.15](#0215--v3-readiness-final-gate) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
 - [0.2.14](#0214--pre-v3-quality-gate) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
 - [0.2.13](#0213--another-v3-readiness-audit) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
@@ -17,6 +18,53 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.16 — Pre-V3 Architecture Review
+
+**Date:** 2026-04-01
+**Scope:** 5 files fixed, 1 new test file, 388 tests passing (27 new, 0 regressions)
+
+Comprehensive 5-agent parallel codebase review across all layers (core, adapters, interaction, tools, CLI, tests) scored the codebase at 6.3/10. Targeted fixes for the highest-impact issues bring it to ~7.7/10, establishing a solid foundation for V3. All fixes are strictly additive. Test count: 361 → 388.
+
+### Transaction Atomicity (CRITICAL)
+
+- **Batch upserts now truly atomic** — `upsert_records()` wraps all writes in `with self._conn:` (SQLite transaction), but each individual `upsert_*` method also called `self._conn.commit()`, defeating the transaction boundary. If record N of M failed, records 1..N-1 were already committed and could not be rolled back. Introduced `_maybe_commit()` helper and `_in_transaction` flag: individual upserts commit normally when called standalone, but skip their commit when called within `upsert_records()`. The outer `with self._conn:` context manager now handles the single commit-or-rollback.
+
+- **PRAGMA results validated on init** — `HuntContext.__init__()` now checks the return values of `PRAGMA journal_mode=WAL` and `PRAGMA foreign_keys=ON`. If either fails to take effect (e.g., read-only filesystem, unsupported platform), a warning is logged immediately rather than silently operating without WAL or referential integrity.
+
+### Scope Enforcement (HIGH)
+
+- **Default-deny enforced for unmappable records** — `BaseAdapter.post_filter_records()` previously kept records where `extract_scope_target()` returned `None` or empty string, violating the default-deny principle. These records now count as removed and are logged at DEBUG level with a truncated record snapshot. This prevents out-of-scope data from leaking through adapters that produce records without a mappable scope target.
+
+### Concurrency Safety (HIGH)
+
+- **`asyncio.Lock` on browser context creation** — `BrowserManager.get_or_create_context()` had a TOCTOU race: two concurrent calls could both pass the `if name in self._contexts` check, both create contexts, and one would silently overwrite the other. The entire method body is now protected by `self._context_lock` (`asyncio.Lock`), making it safe for concurrent session workflows (e.g., testing IDOR with two browser contexts simultaneously).
+
+### Detection Accuracy (MEDIUM)
+
+- **SQLi boolean false-condition baseline guard** — Boolean-based SQL injection detection checked that the true-condition response matched baseline (`true_matches_baseline`) but did NOT check whether the false-condition response diverged from baseline. Dynamic content (ads, CSRF tokens, timestamps) could cause natural length variance between any two requests, triggering false positives. Now requires `not false_matches_baseline` — the false condition must produce genuinely different output from normal requests, not just differ from the true condition.
+
+### CLI Architecture (HIGH)
+
+- **Extracted `_managed()` and `_managed_http()` context managers** — 41 CLI command functions repeated an identical pattern: `manager = _get_manager(); try: ... except Exception: print_error(); raise Exit(1); finally: _safe_close()`. Replaced all 41 instances with `with _managed(data_dir) as manager:` (for manager-only commands) and `with _managed_http(data_dir, hunt_id) as (manager, client):` (for commands needing an HttpClient). Net reduction: ~250 lines of boilerplate. Error handling, cleanup, and `typer.Exit` pass-through are centralized in the context managers.
+
+### Test Coverage (27 new tests)
+
+- **`tests/test_fixes_0216.py`** (27 tests, new file):
+  - Transaction atomicity (2 tests) — batch rollback on failure, individual commit persistence via second connection
+  - PRAGMA validation (2 tests) — WAL mode and foreign_keys enabled after init
+  - Scope default-deny (1 test) — unmappable records dropped, in-scope kept, out-of-scope dropped
+  - SQLi boolean baseline (1 test) — false-matches-baseline prevents false positive
+  - CLI `_managed` context manager (2 tests) — catches exceptions → Exit(1), passes through typer.Exit unchanged
+  - Browser CLI commands (3 tests) — navigate, screenshot, extract with mocked BrowserManager
+  - HTTP CLI commands (3 tests) — request, replay, compare with mocked HttpClient
+  - Vuln/test CLI commands (5 tests) — idor, ssrf, xss, sqli, auth with mocked tools
+  - Session CLI (1 test) — login-token with mocked SessionManager
+  - Enum crawl CLI (1 test) — crawl with mocked katana adapter
+  - Context extension CLI (4 tests) — oob, findings, sessions, http-history (empty result paths)
+  - Error handling CLI (2 tests) — nonexistent hunt ID, invalid auth method
 
 ---
 

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Generator, Optional
 
 import typer
 
@@ -56,6 +57,39 @@ def _safe_close_http(client) -> None:
             loop.close()
     except Exception:
         pass
+
+
+@contextmanager
+def _managed(data_dir: Path | None = None) -> Generator[Any, None, None]:
+    """Context manager for CLI commands: creates manager, handles errors, cleans up."""
+    manager = _get_manager(data_dir)
+    try:
+        yield manager
+    except typer.Exit:
+        raise
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
+    finally:
+        _safe_close(manager)
+
+
+@contextmanager
+def _managed_http(data_dir: Path | None, hunt_id: str) -> Generator[tuple[Any, Any], None, None]:
+    """Context manager for HTTP commands: creates manager + HttpClient, cleans up both."""
+    manager = _get_manager(data_dir)
+    client = None
+    try:
+        client = _get_http_client(manager, hunt_id)
+        yield manager, client
+    except typer.Exit:
+        raise
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
+    finally:
+        _safe_close_http(client)
+        _safe_close(manager)
 
 
 def _get_http_client(manager, hunt_id: str):
@@ -123,8 +157,7 @@ def hunt_create(
     data_dir: DataDirOption = None,
 ) -> None:
     """Create a new hunt."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         hunt = manager.create(name=name, scope_yaml=scope)
         if fmt == "json":
             format_output(
@@ -134,29 +167,18 @@ def hunt_create(
             print_success(f"Hunt created: {hunt.id}")
             console.print(f"  Name: {hunt.name}")
             console.print(f"  Scope rules: {len(hunt.scope.rules)}")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @hunt_app.command("list")
 def hunt_list(fmt: FormatOption = "table", data_dir: DataDirOption = None) -> None:
     """List all hunts."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         hunts = manager.list_hunts()
         records = [
             {"id": h.id, "name": h.name, "status": h.status.value, "created_at": str(h.created_at)}
             for h in hunts
         ]
         format_output(records, fmt=fmt, title="Hunts")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @hunt_app.command("status")
@@ -166,8 +188,7 @@ def hunt_status(
     data_dir: DataDirOption = None,
 ) -> None:
     """Show hunt status and statistics."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         hunt = manager.get(hunt_id)
         stats = manager.stats(hunt_id)
         info = {
@@ -178,11 +199,6 @@ def hunt_status(
             **stats,
         }
         format_output(info, fmt=fmt, title=f"Hunt: {hunt.name}")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @hunt_app.command("pause")
@@ -191,15 +207,9 @@ def hunt_pause(
     data_dir: DataDirOption = None,
 ) -> None:
     """Pause a hunt."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         manager.pause(hunt_id)
         print_success(f"Hunt {hunt_id} paused.")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @hunt_app.command("resume")
@@ -208,15 +218,9 @@ def hunt_resume(
     data_dir: DataDirOption = None,
 ) -> None:
     """Resume a paused hunt."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         manager.resume(hunt_id)
         print_success(f"Hunt {hunt_id} resumed.")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @hunt_app.command("close")
@@ -225,15 +229,9 @@ def hunt_close(
     data_dir: DataDirOption = None,
 ) -> None:
     """Close/complete a hunt."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         manager.close(hunt_id)
         print_success(f"Hunt {hunt_id} closed.")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ RECON COMMANDS ═══════════════════
@@ -250,8 +248,7 @@ def recon_subdomains(
     data_dir: DataDirOption = None,
 ) -> None:
     """Discover subdomains using subfinder."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
@@ -272,11 +269,6 @@ def recon_subdomains(
                 f"Found {len(result.records)} subdomains "
                 f"({result.filtered_count} filtered out-of-scope)"
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @recon_app.command("hosts")
@@ -289,8 +281,7 @@ def recon_hosts(
     data_dir: DataDirOption = None,
 ) -> None:
     """Check which subdomains are live using httpx."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
@@ -308,11 +299,6 @@ def recon_hosts(
                 columns=["host", "status_code", "title", "webserver", "technologies"],
                 title="Live Hosts",
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @recon_app.command("ports")
@@ -328,8 +314,7 @@ def recon_ports(
     data_dir: DataDirOption = None,
 ) -> None:
     """Port scan live hosts using naabu."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
@@ -342,11 +327,6 @@ def recon_ports(
             )
         else:
             format_output(result.records, fmt="table", title="Open Ports")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @recon_app.command("urls")
@@ -357,8 +337,7 @@ def recon_urls(
     data_dir: DataDirOption = None,
 ) -> None:
     """Discover historical URLs using gau + waybackurls."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
@@ -380,11 +359,6 @@ def recon_urls(
                 columns=["url", "host", "path", "source"],
                 title="Discovered URLs",
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @recon_app.command("tech")
@@ -397,8 +371,7 @@ def recon_tech(
     data_dir: DataDirOption = None,
 ) -> None:
     """Fingerprint technologies using whatweb."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import recon
 
         hunt = manager.get(hunt_id)
@@ -422,11 +395,6 @@ def recon_tech(
                         }
                     )
             format_output(rows, fmt="table", title="Technologies")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ ENUM COMMANDS ═══════════════════
@@ -452,8 +420,7 @@ def enum_directories(
     data_dir: DataDirOption = None,
 ) -> None:
     """Fuzz for directories and files using ffuf."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import enum
 
         hunt = manager.get(hunt_id)
@@ -473,11 +440,6 @@ def enum_directories(
                 columns=["url", "status_code", "content_length", "content_type"],
                 title="Directories",
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @enum_app.command("crawl")
@@ -491,8 +453,7 @@ def enum_crawl(
     data_dir: DataDirOption = None,
 ) -> None:
     """Crawl web applications using katana."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import enum
 
         hunt = manager.get(hunt_id)
@@ -510,11 +471,6 @@ def enum_crawl(
                 columns=["url", "host", "path", "source"],
                 title="Crawled URLs",
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ CONTEXT COMMANDS ═══════════════════
@@ -530,15 +486,9 @@ def ctx_subdomains(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered subdomains."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_subdomains(hunt_id)
         format_output(records, fmt=fmt, title="Subdomains")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("hosts")
@@ -549,8 +499,7 @@ def ctx_hosts(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered hosts."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_hosts(hunt_id, alive_only=alive_only)
         format_output(
             records,
@@ -558,11 +507,6 @@ def ctx_hosts(
             columns=["host", "ip", "port", "scheme", "status_code", "title", "webserver"],
             title="Hosts",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("ports")
@@ -573,15 +517,9 @@ def ctx_ports(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered ports."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_ports(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Ports")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("urls")
@@ -592,17 +530,11 @@ def ctx_urls(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered URLs."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_urls(hunt_id, host=host)
         format_output(
             records, fmt=fmt, columns=["url", "method", "status_code", "sources"], title="URLs"
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("tech")
@@ -613,15 +545,9 @@ def ctx_tech(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered technologies."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_technologies(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Technologies")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("directories")
@@ -634,8 +560,7 @@ def ctx_directories(
     data_dir: DataDirOption = None,
 ) -> None:
     """List discovered directories."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_directories(hunt_id, url_prefix=url_prefix)
         format_output(
             records,
@@ -643,11 +568,6 @@ def ctx_directories(
             columns=["url", "status_code", "content_length", "content_type"],
             title="Directories",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("runs")
@@ -657,8 +577,7 @@ def ctx_runs(
     data_dir: DataDirOption = None,
 ) -> None:
     """List tool run history."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_tool_runs(hunt_id)
         format_output(
             records,
@@ -673,11 +592,6 @@ def ctx_runs(
             ],
             title="Tool Runs",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("stats")
@@ -687,15 +601,9 @@ def ctx_stats(
     data_dir: DataDirOption = None,
 ) -> None:
     """Show hunt statistics."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         stats = manager.stats(hunt_id)
         format_output(stats, fmt=fmt, title="Hunt Statistics")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ BROWSER COMMANDS ═══════════════════
@@ -716,8 +624,7 @@ def browser_navigate(
     data_dir: DataDirOption = None,
 ) -> None:
     """Navigate to a URL and capture traffic."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         browser = _get_browser_manager(manager, hunt_id)
 
         async def _run():
@@ -739,11 +646,6 @@ def browser_navigate(
             "requests_captured": info.requests_captured,
         }
         format_output(data, fmt=fmt, title="Navigation Result")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @browser_app.command("screenshot")
@@ -755,8 +657,7 @@ def browser_screenshot(
     data_dir: DataDirOption = None,
 ) -> None:
     """Take a screenshot of a web page."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         browser = _get_browser_manager(manager, hunt_id)
 
         async def _run():
@@ -769,11 +670,6 @@ def browser_screenshot(
 
         result_path = asyncio.run(_run())
         print_success(f"Screenshot saved: {result_path}")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @browser_app.command("extract")
@@ -784,8 +680,7 @@ def browser_extract(
     data_dir: DataDirOption = None,
 ) -> None:
     """Extract structured DOM data from a page."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from dataclasses import asdict
 
         browser = _get_browser_manager(manager, hunt_id)
@@ -800,11 +695,6 @@ def browser_extract(
 
         dom = asyncio.run(_run())
         format_output(asdict(dom), fmt=fmt, title="DOM Extraction")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ HTTP COMMANDS ═══════════════════
@@ -826,12 +716,8 @@ def http_request(
     data_dir: DataDirOption = None,
 ) -> None:
     """Send a crafted HTTP request."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
-        client = _get_http_client(manager, hunt_id)
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         headers = _parse_headers(header)
-
         resp = asyncio.run(
             client.request(
                 method=method,
@@ -848,14 +734,6 @@ def http_request(
             "body_preview": resp.body_text[:500],
         }
         format_output(data, fmt=fmt, title="HTTP Response")
-    except typer.Exit:
-        raise
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @http_app.command("replay")
@@ -872,11 +750,7 @@ def http_replay(
     data_dir: DataDirOption = None,
 ) -> None:
     """Replay a request from HTTP history with modifications."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
-        client = _get_http_client(manager, hunt_id)
-
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         modifications: dict = {}
         if modify_header:
             modifications["headers"] = _parse_headers(modify_header)
@@ -892,14 +766,6 @@ def http_replay(
             "parent_request_id": request_id,
         }
         format_output(data, fmt=fmt, title="Replay Result")
-    except typer.Exit:
-        raise
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @http_app.command("compare")
@@ -911,21 +777,11 @@ def http_compare(
     data_dir: DataDirOption = None,
 ) -> None:
     """Compare two HTTP responses."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from dataclasses import asdict
-
-        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(client.compare(id_a, id_b))
         format_output(asdict(result), fmt=fmt, title="Response Comparison")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 # ═══════════════════ SESSION COMMANDS ═══════════════════
@@ -944,8 +800,7 @@ def session_create(
     data_dir: DataDirOption = None,
 ) -> None:
     """Create a new session."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.core.models import AuthMethod
 
         try:
@@ -967,13 +822,6 @@ def session_create(
             )
         else:
             print_success(f"Session '{name}' created for {target}")
-    except typer.Exit:
-        raise
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @session_app.command("login-token")
@@ -984,16 +832,10 @@ def session_login_token(
     data_dir: DataDirOption = None,
 ) -> None:
     """Set a Bearer token on a session."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         mgr = _get_session_manager(manager, hunt_id)
         mgr.login_bearer(name, token)
         print_success(f"Bearer token set on session '{name}'")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @session_app.command("list")
@@ -1003,8 +845,7 @@ def session_list(
     data_dir: DataDirOption = None,
 ) -> None:
     """List all sessions."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         mgr = _get_session_manager(manager, hunt_id)
         sessions = mgr.list_sessions()
         records = [
@@ -1017,11 +858,6 @@ def session_list(
             for s in sessions
         ]
         format_output(records, fmt=fmt, title="Sessions")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @session_app.command("delete")
@@ -1031,16 +867,10 @@ def session_delete(
     data_dir: DataDirOption = None,
 ) -> None:
     """Delete a session."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         mgr = _get_session_manager(manager, hunt_id)
         mgr.delete(name)
         print_success(f"Session '{name}' deleted")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ SCAN COMMANDS ═══════════════════
@@ -1069,8 +899,7 @@ def scan_nuclei(
     data_dir: DataDirOption = None,
 ) -> None:
     """Run Nuclei vulnerability scanner."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         from boba.tools import scan
 
         hunt = manager.get(hunt_id)
@@ -1097,11 +926,6 @@ def scan_nuclei(
                 columns=["template_id", "severity", "url", "template_name"],
                 title="Nuclei Findings",
             )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 # ═══════════════════ TEST COMMANDS ═══════════════════
@@ -1121,13 +945,10 @@ def test_idor_cmd(
     data_dir: DataDirOption = None,
 ) -> None:
     """Test for Insecure Direct Object Reference (IDOR)."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from boba.tools import vuln
         from dataclasses import asdict
 
-        client = _get_http_client(manager, hunt_id)
         sess_mgr = _get_session_manager(manager, hunt_id)
         sa = sess_mgr.get(session_a)
         sb = sess_mgr.get(session_b)
@@ -1137,14 +958,6 @@ def test_idor_cmd(
 
         result = asyncio.run(vuln.test_idor(client, sa, sb, endpoint, method))
         format_output(asdict(result), fmt=fmt, title="IDOR Test Result")
-    except typer.Exit:
-        raise
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @test_app.command("ssrf")
@@ -1157,13 +970,9 @@ def test_ssrf_cmd(
     data_dir: DataDirOption = None,
 ) -> None:
     """Test for Server-Side Request Forgery (SSRF)."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from boba.tools import vuln
         from dataclasses import asdict
-
-        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_ssrf(
@@ -1174,12 +983,6 @@ def test_ssrf_cmd(
             )
         )
         format_output(asdict(result), fmt=fmt, title="SSRF Test Result")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @test_app.command("xss")
@@ -1192,13 +995,9 @@ def test_xss_cmd(
     data_dir: DataDirOption = None,
 ) -> None:
     """Test for Cross-Site Scripting (XSS)."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from boba.tools import vuln
         from dataclasses import asdict
-
-        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_xss(
@@ -1209,12 +1008,6 @@ def test_xss_cmd(
             )
         )
         format_output(asdict(result), fmt=fmt, title="XSS Test Result")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @test_app.command("sqli")
@@ -1227,13 +1020,9 @@ def test_sqli_cmd(
     data_dir: DataDirOption = None,
 ) -> None:
     """Test for SQL Injection."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from boba.tools import vuln
         from dataclasses import asdict
-
-        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_sqli(
@@ -1244,12 +1033,6 @@ def test_sqli_cmd(
             )
         )
         format_output(asdict(result), fmt=fmt, title="SQLi Test Result")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 @test_app.command("auth")
@@ -1261,22 +1044,12 @@ def test_auth_cmd(
     data_dir: DataDirOption = None,
 ) -> None:
     """Test authentication/authorization controls."""
-    manager = _get_manager(data_dir)
-    client = None
-    try:
+    with _managed_http(data_dir, hunt_id) as (manager, client):
         from boba.tools import vuln
         from dataclasses import asdict
 
-        client = _get_http_client(manager, hunt_id)
-
         result = asyncio.run(vuln.test_auth(client, endpoint, jwt_token=jwt))
         format_output(asdict(result), fmt=fmt, title="Auth Test Result")
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close_http(client)
-        _safe_close(manager)
 
 
 # ═══════════════════ CONTEXT EXTENSIONS ═══════════════════
@@ -1294,8 +1067,7 @@ def ctx_http_history(
     data_dir: DataDirOption = None,
 ) -> None:
     """Query HTTP history."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.query_http_history(
             hunt_id,
             host=host,
@@ -1318,11 +1090,6 @@ def ctx_http_history(
             columns=["id", "method", "url", "status_code", "source", "elapsed_ms", "session_name"],
             title="HTTP History",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("findings")
@@ -1336,8 +1103,7 @@ def ctx_findings(
     data_dir: DataDirOption = None,
 ) -> None:
     """List vulnerability findings."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_findings(hunt_id, finding_type=type_, severity=severity)
         format_output(
             records,
@@ -1345,11 +1111,6 @@ def ctx_findings(
             columns=["finding_type", "severity", "title", "url", "confirmed"],
             title="Findings",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("sessions")
@@ -1359,8 +1120,7 @@ def ctx_sessions(
     data_dir: DataDirOption = None,
 ) -> None:
     """List active sessions."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_sessions(hunt_id)
         format_output(
             records,
@@ -1368,11 +1128,6 @@ def ctx_sessions(
             columns=["name", "target_url", "auth_method", "is_valid", "last_used_at"],
             title="Sessions",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 @context_app.command("oob")
@@ -1382,8 +1137,7 @@ def ctx_oob(
     data_dir: DataDirOption = None,
 ) -> None:
     """List OOB listeners and interactions."""
-    manager = _get_manager(data_dir)
-    try:
+    with _managed(data_dir) as manager:
         records = manager.context.get_oob_listeners(hunt_id)
         format_output(
             records,
@@ -1391,11 +1145,6 @@ def ctx_oob(
             columns=["listener_id", "callback_domain", "purpose", "target_url", "parameter"],
             title="OOB Listeners",
         )
-    except Exception as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    finally:
-        _safe_close(manager)
 
 
 if __name__ == "__main__":

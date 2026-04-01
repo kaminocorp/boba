@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -29,6 +30,7 @@ class BrowserManager:
         self._contexts: dict[str, Any] = {}
         self._pages: dict[str, Any] = {}
         self._request_counts: dict[str, int] = {}
+        self._context_lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Launch Playwright + Chromium."""
@@ -95,40 +97,41 @@ class BrowserManager:
         storage_state: dict | None = None,
     ) -> Any:
         """Get existing or create new named browser context."""
-        if name in self._contexts:
-            return self._contexts[name]
+        async with self._context_lock:
+            if name in self._contexts:
+                return self._contexts[name]
 
-        if not self._browser:
-            raise BrowserError("Browser not started. Call start() first.")
+            if not self._browser:
+                raise BrowserError("Browser not started. Call start() first.")
 
-        ctx_kwargs: dict[str, Any] = {
-            "ignore_https_errors": self._config.ignore_https_errors,
-            "viewport": self._config.viewport,
-        }
-        if self._config.user_agent:
-            ctx_kwargs["user_agent"] = self._config.user_agent
-        if self._config.extra_headers:
-            ctx_kwargs["extra_http_headers"] = self._config.extra_headers
-        if storage_state:
-            ctx_kwargs["storage_state"] = storage_state
+            ctx_kwargs: dict[str, Any] = {
+                "ignore_https_errors": self._config.ignore_https_errors,
+                "viewport": self._config.viewport,
+            }
+            if self._config.user_agent:
+                ctx_kwargs["user_agent"] = self._config.user_agent
+            if self._config.extra_headers:
+                ctx_kwargs["extra_http_headers"] = self._config.extra_headers
+            if storage_state:
+                ctx_kwargs["storage_state"] = storage_state
 
-        context = await self._browser.new_context(**ctx_kwargs)
-        try:
-            if cookies:
-                await context.add_cookies(cookies)
+            context = await self._browser.new_context(**ctx_kwargs)
+            try:
+                if cookies:
+                    await context.add_cookies(cookies)
 
-            # Create a page for this context
-            page = await context.new_page()
-            await self._setup_interception(page, name)
-        except Exception:
-            await context.close()
-            raise
+                # Create a page for this context
+                page = await context.new_page()
+                await self._setup_interception(page, name)
+            except Exception:
+                await context.close()
+                raise
 
-        self._contexts[name] = context
-        self._request_counts[name] = 0
-        self._pages[name] = page
+            self._contexts[name] = context
+            self._request_counts[name] = 0
+            self._pages[name] = page
 
-        return context
+            return context
 
     async def _setup_interception(self, page: Any, context_name: str) -> None:
         """Register response handler to capture all traffic."""
