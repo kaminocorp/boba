@@ -39,7 +39,7 @@ class SessionManager:
         )
         self._persist(state)
         self._cache[name] = state
-        return state
+        return copy.deepcopy(state)
 
     def login_bearer(self, session_name: str, token: str) -> SessionState:
         """Set a Bearer token on a session."""

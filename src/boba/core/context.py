@@ -1012,8 +1012,28 @@ class HuntContext:
                 severity = excluded.severity,
                 title = excluded.title,
                 description = excluded.description,
-                evidence = excluded.evidence,
-                request_ids = excluded.request_ids,
+                evidence = CASE
+                    WHEN findings.evidence IS NULL
+                        OR findings.evidence IN ('null', '[]')
+                        THEN excluded.evidence
+                    WHEN excluded.evidence IS NULL
+                        OR excluded.evidence IN ('null', '[]')
+                        THEN findings.evidence
+                    ELSE substr(findings.evidence, 1,
+                                length(findings.evidence) - 1)
+                         || ',' || substr(excluded.evidence, 2)
+                END,
+                request_ids = CASE
+                    WHEN findings.request_ids IS NULL
+                        OR findings.request_ids IN ('null', '[]')
+                        THEN excluded.request_ids
+                    WHEN excluded.request_ids IS NULL
+                        OR excluded.request_ids IN ('null', '[]')
+                        THEN findings.request_ids
+                    ELSE substr(findings.request_ids, 1,
+                                length(findings.request_ids) - 1)
+                         || ',' || substr(excluded.request_ids, 2)
+                END,
                 tool_run_id = excluded.tool_run_id,
                 confirmed = MAX(findings.confirmed, excluded.confirmed),
                 false_positive = MAX(findings.false_positive, excluded.false_positive),

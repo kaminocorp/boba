@@ -316,6 +316,72 @@ class TestFindings:
         assert findings[0]["title"] == "IDOR v2 — confirmed"
         assert findings[0]["confirmed"] is True
 
+    def test_upsert_merges_evidence(self, context, hunt_id):
+        """Re-detecting a finding must accumulate evidence, not overwrite."""
+        context.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "idor",
+                "severity": "medium",
+                "title": "IDOR on /api/users",
+                "url": "https://x.com/api/users",
+                "parameter": "id",
+                "evidence": [{"note": "first detection"}],
+                "request_ids": [1, 2],
+            },
+        )
+        context.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "idor",
+                "severity": "high",
+                "title": "IDOR on /api/users",
+                "url": "https://x.com/api/users",
+                "parameter": "id",
+                "evidence": [{"note": "second detection"}],
+                "request_ids": [3, 4],
+            },
+        )
+        findings = context.get_findings(hunt_id)
+        assert len(findings) == 1
+        evidence = findings[0]["evidence"]
+        request_ids = findings[0]["request_ids"]
+        # Both evidence entries preserved
+        assert len(evidence) == 2
+        assert evidence[0]["note"] == "first detection"
+        assert evidence[1]["note"] == "second detection"
+        # Both request ID sets preserved
+        assert set(request_ids) == {1, 2, 3, 4}
+
+    def test_upsert_evidence_null_plus_new(self, context, hunt_id):
+        """First upsert with no evidence, second with evidence — should keep the new."""
+        context.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "severity": "low",
+                "title": "XSS",
+                "url": "https://x.com/search",
+                "parameter": "q",
+            },
+        )
+        context.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "severity": "medium",
+                "title": "XSS confirmed",
+                "url": "https://x.com/search",
+                "parameter": "q",
+                "evidence": [{"note": "reflected"}],
+                "request_ids": [10],
+            },
+        )
+        findings = context.get_findings(hunt_id)
+        assert len(findings) == 1
+        assert len(findings[0]["evidence"]) == 1
+        assert findings[0]["request_ids"] == [10]
+
 
 # ═══════════════════ OOB LISTENERS ═══════════════════
 

@@ -105,6 +105,20 @@ class TestListAndDelete:
         assert state.is_valid is False
 
 
+class TestCreateDeepCopy:
+    """create() must return a deep copy so callers cannot mutate the cache."""
+
+    def test_create_returns_deep_copy(self, mgr):
+        state = mgr.create("user_a", "https://app.example.com")
+        # Mutate the returned object
+        state.cookies["injected"] = "evil"
+        state.headers["X-Evil"] = "yes"
+        # Cache must be unaffected
+        fresh = mgr.get("user_a")
+        assert "injected" not in fresh.cookies
+        assert "X-Evil" not in fresh.headers
+
+
 class TestListSessionsDeepCopy:
     """list_sessions() must return deep copies, same as get()."""
 

@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.20](#0220--evidence-merge--session-create-deepcopy--fuzz-warnings) — Finding upsert evidence/request_ids merge (was overwrite), `session.create()` deep-copy consistency, fuzz BATTERING_RAM/PITCHFORK missing-payload warnings. 3 fixes + 5 new tests (434 total)
 - [0.2.19](#0219--scope-bypass-fuzz-baseline--session-cache-safety) — URL prefix cross-domain scope bypass, fuzz baseline marker stripping, `list_sessions()` deep-copy consistency, browser body size cap, CLI http-history JSON data preservation. 5 fixes + 8 new tests (429 total)
 - [0.2.18](#0218--scope-pre-filter-entity-type-fix) — Critical fix: `pre_filter_targets()` used `PRODUCES` as entity type, breaking 4 adapters (naabu, whatweb, ffuf, nuclei). Now uses `"auto"`. 6 new tests (421 total)
 - [0.2.17](#0217--adapter-parse-guards--finding-flag-preservation) — Adapter type guards (6 adapters), BaseAdapter JSON_OBJECT non-dict fix, finding upsert flag preservation via `MAX()`, HttpClient response body size limit (50 MB), CLI cleanup logging, 1 new test file + 27 new tests (415 total)
@@ -21,6 +22,52 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.20 — Evidence Merge, Session Create Deepcopy & Fuzz Warnings
+
+**Date:** 2026-04-01
+**Scope:** 3 files fixed, 5 new tests, 434 tests passing (5 new, 0 regressions)
+
+Pre-V3 codebase review: 5-agent parallel review across all layers (core, adapters, interaction, tools/vuln, CLI/tests). ~150 raw findings triaged down to 3 real, actionable issues. Adapters layer came back fully clean (zero bugs after 19 rounds of hardening). Tools/vuln detection logic verified sound. The 3 fixes address data loss in finding upserts, a session cache mutation vector, and silent fuzz campaign failures. Test count: 429 → 434.
+
+### Finding Upsert Evidence/Request IDs Overwrite (HIGH)
+
+- **`upsert_finding()` ON CONFLICT replaced evidence and request_ids wholesale** — When the same finding was detected multiple times (same hunt_id + finding_type + url + parameter), the `ON CONFLICT` clause used `evidence = excluded.evidence` and `request_ids = excluded.request_ids`, which discarded all evidence and request IDs from prior detections. For a security tool, this audit trail matters — the first detection's evidence (different payloads, different endpoints, different sessions) was silently lost.
+
+  **Fix:** `evidence` and `request_ids` now use a `CASE` expression that merges the existing and new JSON arrays via string concatenation (`substr` to strip `]`/`[` and join with `,`). Handles NULL and empty-array edge cases on both sides. The merge is append-only — evidence accumulates across detections.
+
+### `session.create()` Returns Mutable Cache Reference (HIGH)
+
+- **`SessionManager.create()` returned the same object stored in `self._cache`** — Unlike `get()` and `list_sessions()` (fixed in 0.2.19) which return `copy.deepcopy()`, `create()` returned the raw `SessionState` object. A caller mutating the returned session (e.g., adding cookies or headers) would silently corrupt the internal cache without persisting changes to the database.
+
+  **Fix:** `create()` now returns `copy.deepcopy(state)`, consistent with `get()` and `list_sessions()`.
+
+### Fuzz BATTERING_RAM/PITCHFORK Silent Empty Results (MEDIUM)
+
+- **`_generate_combinations()` silently returned `[]` when position names didn't match payload keys** — BATTERING_RAM used `payloads.get(positions[0], [])` which returns `[]` if the position name doesn't exist in the payload dict. PITCHFORK used `[payloads.get(pos, []) for pos in positions]` — any empty list causes `zip(*payload_lists)` to produce zero combinations. In both cases, the fuzz campaign would send zero requests with no warning, making it appear the test completed when nothing was actually tested.
+
+  **Fix:** Both attack types now log a warning identifying the missing position names when zero combinations would be generated. The return value remains `[]` (no exception) since the caller may intentionally handle empty results, but the warning ensures operators are aware.
+
+### Test Coverage (5 new tests)
+
+- **`tests/interaction/test_session.py::TestCreateDeepCopy`** (1 test):
+  - Mutating returned session from `create()` does not corrupt internal cache
+
+- **`tests/core/test_context_v2.py::TestFindings`** (2 tests):
+  - Re-upserting a finding merges evidence arrays (both entries preserved)
+  - First upsert with no evidence + second with evidence keeps the new evidence
+
+- **`tests/interaction/test_http.py::TestFuzzCombinations`** (2 tests):
+  - BATTERING_RAM with mismatched position names warns and returns `[]`
+  - PITCHFORK with missing position payloads warns and returns `[]`
+
+### Review Layers That Came Back Clean
+
+- **Adapters (10 files)** — Fully clean after 19 rounds. All command construction list-based, all parse_record methods have type guards, scope mode assignments correct, binary discovery safe, temp file lifecycle handled.
+- **Tools/vuln (8 files)** — Detection logic verified sound: IDOR three-way comparison correct, SQLi dual-guard boolean with median-baseline timing, XSS entity-encoding awareness, SSRF structural regex patterns. All payloads read-only.
+- **CLI (1,157 lines)** — Async-to-sync bridging correct across 20 commands, resource cleanup via `_managed()` context manager, JSON output preserves all fields for agent consumers.
 
 ---
 

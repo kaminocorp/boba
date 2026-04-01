@@ -253,6 +253,28 @@ class TestFuzzCombinations:
         assert combos[0] == {"user": "admin", "pass": "pass1"}
         assert combos[1] == {"user": "root", "pass": "pass2"}
 
+    def test_battering_ram_missing_payloads(self, client, caplog):
+        """BATTERING_RAM with mismatched position names should warn, not silently return []."""
+        combos = client._generate_combinations(
+            positions=["param2"],
+            payloads={"param1": ["val1"]},
+            attack_type=FuzzAttackType.BATTERING_RAM,
+        )
+        assert combos == []
+        assert "BATTERING_RAM" in caplog.text
+        assert "param2" in caplog.text
+
+    def test_pitchfork_missing_payloads(self, client, caplog):
+        """PITCHFORK with a position missing payloads should warn, not silently return []."""
+        combos = client._generate_combinations(
+            positions=["p1", "p2", "p3"],
+            payloads={"p1": ["a"], "p2": ["b"]},
+            attack_type=FuzzAttackType.PITCHFORK,
+        )
+        assert combos == []
+        assert "PITCHFORK" in caplog.text
+        assert "p3" in caplog.text
+
     def test_cluster_bomb(self, client):
         combos = client._generate_combinations(
             positions=["user", "pass"],

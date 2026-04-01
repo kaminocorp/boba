@@ -382,10 +382,23 @@ class HttpClient:
         elif attack_type == FuzzAttackType.BATTERING_RAM:
             # All positions get same payload
             all_payloads = payloads.get(positions[0], [])
+            if not all_payloads:
+                missing = [p for p in positions if p not in payloads]
+                if missing:
+                    logger.warning(
+                        "BATTERING_RAM: no payloads for positions %s — 0 combinations generated",
+                        missing,
+                    )
             return [{pos: p for pos in positions} for p in all_payloads]
 
         elif attack_type == FuzzAttackType.PITCHFORK:
             # Positions paired by index
+            missing = [p for p in positions if not payloads.get(p)]
+            if missing:
+                logger.warning(
+                    "PITCHFORK: no payloads for positions %s — 0 combinations generated",
+                    missing,
+                )
             payload_lists = [payloads.get(pos, []) for pos in positions]
             return [dict(zip(positions, vals)) for vals in zip(*payload_lists)]
 
