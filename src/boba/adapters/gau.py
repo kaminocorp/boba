@@ -21,8 +21,10 @@ class GauAdapter(BaseAdapter):
 
     def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         cmd = [str(self._binary_path)]
-        cmd.extend(targets)
         cmd.extend(config.extra_args)
+        # Use -- to prevent targets starting with - from being parsed as flags
+        cmd.append("--")
+        cmd.extend(targets)
         return cmd, None
 
     def parse_record(self, raw: str) -> dict[str, Any]:

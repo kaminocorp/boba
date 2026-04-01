@@ -16,6 +16,7 @@ from boba.adapters.katana import KatanaAdapter
 from boba.adapters.naabu import NaabuAdapter
 from boba.adapters.nuclei import NucleiAdapter
 from boba.adapters.subfinder import SubfinderAdapter
+from boba.adapters.waybackurls import WaybackurlsAdapter
 from boba.adapters.whatweb import WhatwebAdapter
 from boba.core.models import AdapterConfig, ScopeAction, ScopeConfig, ScopeRule, ScopeRuleType
 from boba.core.scope import ScopeEngine
@@ -359,3 +360,48 @@ class TestNucleiAdapter:
         assert "-l" in cmd
         assert len(adapter._temp_files) == 1
         adapter._cleanup_temp_files()
+
+
+# ── WaybackurlsAdapter ────────────────────────────────────────────────
+
+
+class TestWaybackurlsAdapter:
+    def test_build_command_returns_binary_and_extra_args(self, scope, config):
+        adapter = WaybackurlsAdapter(scope_engine=scope)
+        adapter._binary_path = Path("/usr/bin/waybackurls")
+        config.extra_args = ["--no-subs"]
+        cmd, output_file = adapter.build_command(["example.com"], config)
+        assert output_file is None
+        assert cmd[0] == "/usr/bin/waybackurls"
+        assert "--no-subs" in cmd
+        # Targets should NOT appear in the command (they go via stdin)
+        assert "example.com" not in cmd
+
+    def test_build_command_stores_stdin_targets(self, scope, config):
+        adapter = WaybackurlsAdapter(scope_engine=scope)
+        adapter._binary_path = Path("/usr/bin/waybackurls")
+        adapter.build_command(["example.com", "sub.example.com"], config)
+        assert adapter._stdin_targets == ["example.com", "sub.example.com"]
+
+    def test_parse_record_simple_url(self, scope):
+        adapter = WaybackurlsAdapter(scope_engine=scope)
+        result = adapter.parse_record("https://example.com/about")
+        assert result["url"] == "https://example.com/about"
+        assert result["host"] == "example.com"
+        assert result["path"] == "/about"
+        assert result["query"] == ""
+        assert result["source"] == "waybackurls"
+
+    def test_parse_record_url_with_query(self, scope):
+        adapter = WaybackurlsAdapter(scope_engine=scope)
+        result = adapter.parse_record("https://api.example.com/search?q=test&page=2")
+        assert result["url"] == "https://api.example.com/search?q=test&page=2"
+        assert result["host"] == "api.example.com"
+        assert result["path"] == "/search"
+        assert result["query"] == "q=test&page=2"
+        assert result["source"] == "waybackurls"
+
+    def test_extract_scope_target(self, scope):
+        adapter = WaybackurlsAdapter(scope_engine=scope)
+        record = {"url": "https://example.com/path", "host": "example.com"}
+        assert adapter.extract_scope_target(record) == "https://example.com/path"

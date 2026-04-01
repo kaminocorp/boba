@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.12](#0212--another-v3-readiness-review) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
 - [0.2.11](#0211--pre-v3-quality-gate--test-coverage) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
 - [0.2.10](#0210--v3-readiness-final-quality-pass) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
 - [0.2.9](#029--v3-readiness-final-gate) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
@@ -13,6 +14,41 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.12 — Another V3 Readiness Review
+
+**Date:** 2026-04-01
+**Scope:** 7 files fixed, 3 test files expanded/created, 265 tests passing (59 new, 0 regressions)
+
+5-agent parallel codebase review across all layers. Found 0 critical, 0 high, and 11 medium/low issues surviving all prior hardening rounds (0.2.1–0.2.11). All fixes are strictly additive. Test count: 206 → 265.
+
+### Correctness
+
+- **SQL LIKE wildcard injection in `get_directories()` and `query_http_history()`** — `%` and `_` in caller-provided `url_prefix`/`path_prefix` were passed unescaped to LIKE queries, matching unintended rows. Now escaped with `ESCAPE '\'` clause.
+- **IDOR bodies-differ false positive** — when User A and User B both get 2xx but bodies differ (e.g., `/api/me` returning per-user data), confidence downgraded from `LIKELY` to `POSSIBLE` and `vulnerable` set to `False`
+- **SSRF cloud metadata 200 check too permissive** — bare `200` status for `169.254.169.254` payloads now requires metadata-like body content (`ami-id`, `instance-id`, `computeMetadata`, etc.) to reduce false positives from generic WAF/error pages
+- **`recon.hosts()` missing source attribution** — `upsert_records` call now passes `source="httpx"` for proper provenance tracking
+
+### Safety
+
+- **`gau` argument injection** — targets passed as positional CLI arguments could be interpreted as flags if starting with `-`; now preceded by `--` separator
+- **Waybackurls pre-filter bypass** — `_stdin_targets` was set before `super().run()` pre-filtering; moved into `build_command()` which receives already-filtered targets
+- **IDOR `object_ids` scope enforcement** — reconstructed enumeration URLs now validated against hunt scope before requesting; out-of-scope URLs are skipped
+
+### Robustness
+
+- **Fuzz header marker substitution** — `HttpClient.fuzz()` now substitutes `§FUZZ§` markers in headers (alongside url/body) and copies headers per iteration to prevent cross-contamination
+- **Browser `sink.record()` exception safety** — `_on_response` handler wraps `sink.record()` in try/except so database errors don't crash Playwright's event loop
+- **CLI context commands error handling** — all 12 context query commands (`subdomains`, `hosts`, `ports`, `urls`, `tech`, `directories`, `runs`, `stats`, `http-history`, `findings`, `sessions`, `oob`) now catch `Exception` with `print_error()` instead of exposing raw tracebacks
+- **`session_create` double error printing** — `except typer.Exit: raise` added before the general `Exception` handler to prevent `typer.Exit(1)` from being caught and printed as `Error: 1`
+
+### Test Coverage (59 new tests)
+
+- **`tests/cli/test_cli.py`** (+26 tests) — hunt resume, all 10 context query commands (empty + with data + JSON format)
+- **`tests/adapters/test_adapters.py`** (+5 tests) — WaybackurlsAdapter build_command, stdin target storage, parse_record, extract_scope_target
+- **`tests/tools/test_scan.py`** (28 tests, new file) — nuclei_scan tool-layer composition, NucleiAdapter parse_record/build_command/extract_scope_target, severity/tags/template filters
 
 ---
 

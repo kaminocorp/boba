@@ -152,23 +152,26 @@ class BrowserManager:
                 logger.debug("Could not read response headers for %s: %s", response.url, exc)
                 resp_headers = {}
 
-            self._sink.record(
-                method=response.request.method,
-                url=response.url,
-                request_headers=req_headers,
-                request_body=response.request.post_data,
-                status_code=response.status,
-                response_headers=resp_headers,
-                response_body=body,
-                # Playwright timing dict values are relative to navigationStart, not
-                # request-level elapsed time.  We cannot reliably compute per-request
-                # elapsed inside the response handler, so record 0 and let callers
-                # use navigate()'s wall-clock timing for page-level latency.
-                elapsed_ms=0,
-                source="browser",
-                session_name=context_name if context_name != "default" else None,
-                resource_type=response.request.resource_type,
-            )
+            try:
+                self._sink.record(
+                    method=response.request.method,
+                    url=response.url,
+                    request_headers=req_headers,
+                    request_body=response.request.post_data,
+                    status_code=response.status,
+                    response_headers=resp_headers,
+                    response_body=body,
+                    # Playwright timing dict values are relative to navigationStart, not
+                    # request-level elapsed time.  We cannot reliably compute per-request
+                    # elapsed inside the response handler, so record 0 and let callers
+                    # use navigate()'s wall-clock timing for page-level latency.
+                    elapsed_ms=0,
+                    source="browser",
+                    session_name=context_name if context_name != "default" else None,
+                    resource_type=response.request.resource_type,
+                )
+            except Exception as exc:
+                logger.debug("Failed to record HTTP exchange for %s: %s", response.url, exc)
             self._request_counts[context_name] = self._request_counts.get(context_name, 0) + 1
 
         page.on("response", _on_response)

@@ -661,9 +661,11 @@ class HuntContext:
 
     def get_directories(self, hunt_id: str, url_prefix: str | None = None) -> list[dict[str, Any]]:
         if url_prefix:
+            # Escape LIKE wildcards (% and _) so caller input is matched literally
+            escaped = url_prefix.replace("%", "\\%").replace("_", "\\_")
             rows = self._conn.execute(
-                "SELECT * FROM directories WHERE hunt_id = ? AND url LIKE ? ORDER BY url",
-                (hunt_id, f"{url_prefix}%"),
+                "SELECT * FROM directories WHERE hunt_id = ? AND url LIKE ? ESCAPE '\\' ORDER BY url",
+                (hunt_id, f"{escaped}%"),
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -839,8 +841,10 @@ class HuntContext:
             sql += " AND session_name = ?"
             params.append(session_name)
         if path_prefix:
-            sql += " AND path LIKE ?"
-            params.append(f"{path_prefix}%")
+            # Escape LIKE wildcards (% and _) so caller input is matched literally
+            escaped = path_prefix.replace("%", "\\%").replace("_", "\\_")
+            sql += " AND path LIKE ? ESCAPE '\\'"
+            params.append(f"{escaped}%")
 
         sql += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)

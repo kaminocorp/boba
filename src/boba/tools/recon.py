@@ -61,7 +61,7 @@ async def hosts(
     scope = ScopeEngine(hunt.scope)
     adapter = HttpxRunnerAdapter(scope_engine=scope)
     result = await adapter.run(targets=targets, config=config)
-    context.upsert_records(hunt.id, "host", result.records)
+    context.upsert_records(hunt.id, "host", result.records, source="httpx")
     context.log_tool_run(hunt.id, result)
     return result
 

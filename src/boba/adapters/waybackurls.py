@@ -25,6 +25,8 @@ class WaybackurlsAdapter(BaseAdapter):
         return "go install -v github.com/tomnomnom/waybackurls@latest"
 
     def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
+        # Store targets for stdin piping here (after pre-filtering in super().run())
+        self._stdin_targets = targets
         cmd = [str(self._binary_path)]
         cmd.extend(config.extra_args)
         return cmd, None
@@ -37,11 +39,6 @@ class WaybackurlsAdapter(BaseAdapter):
             env_vars=config.env_vars if config.env_vars else None,
             stdin_data="\n".join(self._stdin_targets),
         )
-
-    async def run(self, targets, config=None):
-        """Override to store targets for stdin piping."""
-        self._stdin_targets = targets
-        return await super().run(targets, config)
 
     def parse_record(self, raw: str) -> dict[str, Any]:
         url = raw.strip()

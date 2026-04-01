@@ -269,19 +269,24 @@ class HttpClient:
         baseline_length = 0
 
         for i, combo in enumerate(combinations):
-            # Apply payloads to template
+            # Apply payloads to template (url, body, and headers)
             fuzzed_url = url
             fuzzed_body = body
+            fuzzed_headers = dict(headers) if headers else None
             for pos_name, payload in combo.items():
                 marker = f"{FUZZ_MARKER}{pos_name}{FUZZ_MARKER}"
                 fuzzed_url = fuzzed_url.replace(marker, payload)
                 if fuzzed_body:
                     fuzzed_body = fuzzed_body.replace(marker, payload)
+                if fuzzed_headers:
+                    fuzzed_headers = {
+                        k: v.replace(marker, payload) for k, v in fuzzed_headers.items()
+                    }
 
             resp = await self.request(
                 method=method,
                 url=fuzzed_url,
-                headers=headers,
+                headers=fuzzed_headers,
                 body=fuzzed_body,
                 cookies=cookies,
                 source="fuzz",

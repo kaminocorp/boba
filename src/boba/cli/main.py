@@ -446,6 +446,9 @@ def ctx_subdomains(
     try:
         records = manager.context.get_subdomains(hunt_id)
         format_output(records, fmt=fmt, title="Subdomains")
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -467,6 +470,9 @@ def ctx_hosts(
             columns=["host", "ip", "port", "scheme", "status_code", "title", "webserver"],
             title="Hosts",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -483,6 +489,9 @@ def ctx_ports(
     try:
         records = manager.context.get_ports(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Ports")
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -501,6 +510,9 @@ def ctx_urls(
         format_output(
             records, fmt=fmt, columns=["url", "method", "status_code", "sources"], title="URLs"
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -517,6 +529,9 @@ def ctx_tech(
     try:
         records = manager.context.get_technologies(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Technologies")
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -540,6 +555,9 @@ def ctx_directories(
             columns=["url", "status_code", "content_length", "content_type"],
             title="Directories",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -567,6 +585,9 @@ def ctx_runs(
             ],
             title="Tool Runs",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -582,6 +603,9 @@ def ctx_stats(
     try:
         stats = manager.stats(hunt_id)
         format_output(stats, fmt=fmt, title="Hunt Statistics")
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -902,6 +926,8 @@ def session_create(
             )
         else:
             print_success(f"Session '{name}' created for {target}")
+    except typer.Exit:
+        raise
     except Exception as e:
         print_error(str(e))
         raise typer.Exit(1)
@@ -1281,6 +1307,9 @@ def ctx_http_history(
             columns=["id", "method", "url", "status_code", "source", "elapsed_ms", "session_name"],
             title="HTTP History",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -1305,6 +1334,9 @@ def ctx_findings(
             columns=["finding_type", "severity", "title", "url", "confirmed"],
             title="Findings",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -1325,6 +1357,9 @@ def ctx_sessions(
             columns=["name", "target_url", "auth_method", "is_valid", "last_used_at"],
             title="Sessions",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 
@@ -1345,6 +1380,9 @@ def ctx_oob(
             columns=["listener_id", "callback_domain", "purpose", "target_url", "parameter"],
             title="OOB Listeners",
         )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     finally:
         _safe_close(manager)
 

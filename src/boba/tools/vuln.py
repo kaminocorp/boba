@@ -43,6 +43,7 @@ async def test_idor(
     method: str = "GET",
     body: str | None = None,
     object_ids: list[str] | None = None,
+    scope_engine: Any | None = None,
 ) -> VulnTestResult:
     """Test for Insecure Direct Object Reference (IDOR).
 
@@ -114,13 +115,15 @@ async def test_idor(
                 "This indicates broken access control."
             )
         else:
-            vulnerable = True
-            confidence = Confidence.LIKELY
+            # Bodies differ — this is expected for per-user endpoints (e.g. /api/me)
+            # where each user gets their own data. Not a strong IDOR signal.
+            vulnerable = False
+            confidence = Confidence.POSSIBLE
             description = (
                 f"User B ({session_b.name}) received {resp_b.status_code} for {endpoint}, "
                 f"same as User A ({resp_a.status_code}), "
                 f"while unauthenticated got {resp_unauth.status_code}. "
-                "Bodies differ — may be a shared endpoint returning user-specific data."
+                "Bodies differ — likely a per-user endpoint, not broken access control."
             )
     elif b_success and a_success:
         # Both succeed — could be public endpoint or IDOR
@@ -153,6 +156,9 @@ async def test_idor(
             path_parts = parsed_ep.path.rstrip("/").split("/")
             path_parts[-1] = obj_id
             test_url = urlunparse(parsed_ep._replace(path="/".join(path_parts)))
+            # Scope check: verify the constructed URL is still in scope
+            if scope_engine and not scope_engine.is_in_scope(test_url):
+                continue
             resp = await http_client.request(
                 method=method,
                 url=test_url,
@@ -256,20 +262,28 @@ async def test_ssrf(
                     )
                     break
 
-            # Cloud metadata 200 check — always collect evidence even if
-            # already flagged, since metadata access is higher severity
+            # Cloud metadata 200 check — require metadata-like body content
+            # to reduce false positives from generic 200 error/WAF pages
             if resp.status_code == 200 and "169.254.169.254" in payload:
-                if not vulnerable:
-                    vulnerable = True
-                    confidence = Confidence.LIKELY
-                evidence.append(
-                    {
-                        "payload": payload,
-                        "param": param_name,
-                        "note": "200 response for cloud metadata URL",
-                        "request_id": resp.request_id,
-                    }
+                body_lower = resp.body_text.lower()
+                metadata_signals = (
+                    "ami-id", "instance-id", "iam", "security-credentials",
+                    "hostname", "local-ipv4", "public-ipv4", "meta-data",
+                    "computeMetadata", "instance/", "project/",
                 )
+                has_metadata_content = any(sig.lower() in body_lower for sig in metadata_signals)
+                if has_metadata_content:
+                    if not vulnerable:
+                        vulnerable = True
+                        confidence = Confidence.LIKELY
+                    evidence.append(
+                        {
+                            "payload": payload,
+                            "param": param_name,
+                            "note": "200 response with metadata-like content for cloud metadata URL",
+                            "request_id": resp.request_id,
+                        }
+                    )
 
             # Stop testing this injection point once confirmed
             if confidence == Confidence.CONFIRMED:
