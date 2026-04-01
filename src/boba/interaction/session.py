@@ -48,7 +48,7 @@ class SessionManager:
         state.tokens["access_token"] = token
         state.headers["Authorization"] = f"Bearer {token}"
         self._persist(state)
-        return state
+        return copy.deepcopy(state)
 
     def login_basic(self, session_name: str, username: str, password: str) -> SessionState:
         """Set HTTP Basic auth on a session."""
@@ -57,7 +57,7 @@ class SessionManager:
         encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
         state.headers["Authorization"] = f"Basic {encoded}"
         self._persist(state)
-        return state
+        return copy.deepcopy(state)
 
     def login_cookies(self, session_name: str, cookies: dict[str, str]) -> SessionState:
         """Inject raw cookies into a session."""
@@ -65,7 +65,7 @@ class SessionManager:
         state.auth_method = AuthMethod.COOKIE
         state.cookies.update(cookies)
         self._persist(state)
-        return state
+        return copy.deepcopy(state)
 
     async def login_form(
         self,
@@ -145,7 +145,7 @@ class SessionManager:
         state.auth_method = AuthMethod.FORM
 
         self._persist(state)
-        return state
+        return copy.deepcopy(state)
 
     def login_header(self, session_name: str, header_name: str, header_value: str) -> SessionState:
         """Set a custom auth header on a session."""
@@ -153,7 +153,7 @@ class SessionManager:
         state.auth_method = AuthMethod.CUSTOM_HEADER
         state.headers[header_name] = header_value
         self._persist(state)
-        return state
+        return copy.deepcopy(state)
 
     def apply_to_headers(self, session_name: str) -> dict[str, str]:
         """Return headers dict with auth for HttpClient."""

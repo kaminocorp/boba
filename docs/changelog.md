@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.21](#0221--nuclei-collision--login-deepcopy--idor-empty-body--sqli-confirm) — Nuclei finding collision fix (template_id as unique key), session `login_*()` deep-copy consistency, IDOR empty-body false negative, Nuclei scope mode to "both", hunt_create JSON scope_rules, SQLi time-based confirmation, HuntManager context manager. 8 fixes + 12 new tests (446 total)
 - [0.2.20](#0220--evidence-merge--session-create-deepcopy--fuzz-warnings) — Finding upsert evidence/request_ids merge (was overwrite), `session.create()` deep-copy consistency, fuzz BATTERING_RAM/PITCHFORK missing-payload warnings. 3 fixes + 5 new tests (434 total)
 - [0.2.19](#0219--scope-bypass-fuzz-baseline--session-cache-safety) — URL prefix cross-domain scope bypass, fuzz baseline marker stripping, `list_sessions()` deep-copy consistency, browser body size cap, CLI http-history JSON data preservation. 5 fixes + 8 new tests (429 total)
 - [0.2.18](#0218--scope-pre-filter-entity-type-fix) — Critical fix: `pre_filter_targets()` used `PRODUCES` as entity type, breaking 4 adapters (naabu, whatweb, ffuf, nuclei). Now uses `"auto"`. 6 new tests (421 total)
@@ -22,6 +23,83 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.21 — Nuclei Collision, Login Deepcopy, IDOR Empty Body & SQLi Confirm
+
+**Date:** 2026-04-01
+**Scope:** 8 files fixed, 12 new tests, 446 tests passing (12 new, 0 regressions)
+
+Pre-V3 codebase review: 5-agent parallel review across all layers rated the codebase ~7.5/10. Eight real, actionable findings addressed — four must-fix (data loss, scope bypass, detection false negatives, cache mutation) and four should-fix (CLI completeness, resource lifecycle, detection false positives, context manager support). Test count: 434 → 446.
+
+### Nuclei Findings Silently Overwritten on Same URL (HIGH)
+
+- **`upsert_finding()` collided when multiple Nuclei templates matched the same URL** — The unique constraint `(hunt_id, finding_type, url, parameter)` always had `parameter=""` for Nuclei findings. Two different template matches (e.g., `CVE-2021-44228` and a misconfiguration) on the same URL would collide, with the second silently overwriting the first's title, description, and severity.
+
+  **Fix:** `parameter` is now set to `record.get("template_id", "")`, making the unique key `(hunt_id, "http", url, "CVE-2021-44228")` — naturally distinct per template.
+
+### Session `login_*` Methods Return Mutable Cache References (HIGH)
+
+- **`login_bearer()`, `login_basic()`, `login_cookies()`, `login_header()`, `login_form()` returned the same object stored in `self._cache`** — Unlike `create()` and `get()` which return `copy.deepcopy()`, the login methods returned the raw cached reference. A caller mutating the returned `SessionState` would silently corrupt the in-memory cache without persisting the change.
+
+  **Fix:** All five `login_*` methods now return `copy.deepcopy(state)`, consistent with `create()` and `get()`.
+
+### IDOR False Negatives on Empty Response Bodies (HIGH)
+
+- **`_bodies_similar()` returned `False` when both bodies were empty** — For DELETE endpoints returning `204 No Content`, both User A and User B get empty bodies. The old guard `if not body_a or not body_b: return False` treated this as "not similar," causing confirmed DELETE IDORs to be missed.
+
+  **Fix:** The guard now returns `not body_a and not body_b` — two empty bodies are similar, one empty + one non-empty are not.
+
+### Nuclei `SCOPE_MODE` Should Be "both" (MEDIUM)
+
+- **Nuclei's `matched-at` URL can differ from input targets** — After redirects or via virtual hosting, the output URL may point to a different host than the input. With `SCOPE_MODE = "pre"`, only input targets were scope-checked, allowing out-of-scope findings to be persisted.
+
+  **Fix:** Changed to `SCOPE_MODE = "both"` so both input targets and output URLs are scope-filtered.
+
+### `hunt_create` JSON Output Missing Scope Info (MEDIUM)
+
+- **Agent consumers couldn't verify scope was loaded** — The JSON output for `hunt create` only included `{id, name, status}`. An agent creating a hunt with `--scope` had no way to confirm the scope was parsed correctly.
+
+  **Fix:** JSON output now includes `scope_rules` count.
+
+### Cross-Loop HTTP Client Cleanup (LOW)
+
+- **`_safe_close_http` created a new event loop to close the httpx client** — After `asyncio.run()` closes its loop, the HTTP client was closed on a different loop. While httpx handles this gracefully, it's architecturally fragile.
+
+  **Fix:** Added `_run_with_http_cleanup()` async helper that closes the client inside the same event loop. The `_safe_close_http` fallback remains as a safety net.
+
+### Time-Based SQLi Single-Sample False Positives (LOW)
+
+- **One slow response triggered detection** — A single network hiccup or backend GC pause could cause a 3s+ spike on a non-vulnerable endpoint, producing a false positive. Industry practice (sqlmap, etc.) requires confirmation.
+
+  **Fix:** After an initial slow response, a confirmation request is sent with the same payload. Only if both exhibit ≥3s delay over baseline is the finding reported. A slow-then-fast pattern is discarded as a network fluke.
+
+### `HuntManager` Lacks Context Manager Protocol (LOW)
+
+- **No `__enter__`/`__exit__` meant exception-path connection leaks** — `HuntManager` only had `close_context()`. If an exception occurred before reaching the cleanup call, the SQLite connection leaked.
+
+  **Fix:** Added `__enter__`/`__exit__` that delegate to `close_context()`, enabling `with HuntManager(...) as mgr:` usage.
+
+### Test Coverage (12 new tests)
+
+- **`tests/tools/test_scan.py::TestNucleiScanTemplateIdAsParameter`** (1 test):
+  - Two findings with different template_ids for the same URL are both persisted
+
+- **`tests/interaction/test_session.py::TestLoginDeepCopy`** (4 tests):
+  - Mutating returned state from `login_bearer` / `login_basic` / `login_cookies` / `login_header` does not corrupt internal cache
+
+- **`tests/tools/test_vuln.py::TestBodiesSimilar`** (2 tests):
+  - Both-empty bodies are similar; one-empty + one-non-empty are not
+
+- **`tests/tools/test_vuln.py::TestSQLiTimeBased`** (2 tests):
+  - Slow+slow confirmation → detected; slow+fast (fluke) → not detected
+
+- **`tests/cli/test_cli.py::TestHuntCreateJsonScopeRules`** (1 test):
+  - `hunt create --format json` includes `scope_rules` key
+
+- **`tests/core/test_hunt.py::TestHuntManagerContextManager`** (2 tests):
+  - `with` statement works and closes context; `__enter__` returns self
 
 ---
 

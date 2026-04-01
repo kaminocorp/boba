@@ -69,3 +69,9 @@ class HuntManager:
 
     def close_context(self) -> None:
         self._context.close()
+
+    def __enter__(self) -> HuntManager:
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close_context()

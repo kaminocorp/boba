@@ -67,6 +67,28 @@ class TestHuntCreate:
         assert data["status"] == "active"
 
 
+class TestHuntCreateJsonScopeRules:
+    """Fix 5: JSON output from hunt_create now includes scope_rules count."""
+
+    def test_hunt_create_json_includes_scope_rules(self, tmp_path):
+        result = runner.invoke(
+            app,
+            [
+                "hunt",
+                "create",
+                "--name",
+                "Scope Rules Hunt",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "scope_rules" in data
+
+
 class TestHuntList:
     def test_hunt_list_empty(self, tmp_path):
         result = runner.invoke(app, ["hunt", "list", "--data-dir", str(tmp_path)])

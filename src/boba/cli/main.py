@@ -62,6 +62,14 @@ def _safe_close_http(client) -> None:
         logger.debug("Failed to close HTTP client: %s", exc)
 
 
+async def _run_with_http_cleanup(client, coro):
+    """Run a coroutine and ensure the HTTP client is closed in the same event loop."""
+    try:
+        return await coro
+    finally:
+        await client.close()
+
+
 @contextmanager
 def _managed(data_dir: Path | None = None) -> Generator[Any, None, None]:
     """Context manager for CLI commands: creates manager, handles errors, cleans up."""
@@ -79,7 +87,12 @@ def _managed(data_dir: Path | None = None) -> Generator[Any, None, None]:
 
 @contextmanager
 def _managed_http(data_dir: Path | None, hunt_id: str) -> Generator[tuple[Any, Any], None, None]:
-    """Context manager for HTTP commands: creates manager + HttpClient, cleans up both."""
+    """Context manager for HTTP commands: creates manager + HttpClient, cleans up both.
+
+    HTTP client cleanup now happens inside the same event loop via
+    ``_run_with_http_cleanup`` — callers should wrap their coroutine with it.
+    The fallback ``_safe_close_http`` catches anything missed.
+    """
     manager = _get_manager(data_dir)
     client = None
     try:
@@ -164,7 +177,13 @@ def hunt_create(
         hunt = manager.create(name=name, scope_yaml=scope)
         if fmt == "json":
             format_output(
-                {"id": hunt.id, "name": hunt.name, "status": hunt.status.value}, fmt="json"
+                {
+                    "id": hunt.id,
+                    "name": hunt.name,
+                    "status": hunt.status.value,
+                    "scope_rules": len(hunt.scope.rules),
+                },
+                fmt="json",
             )
         else:
             print_success(f"Hunt created: {hunt.id}")

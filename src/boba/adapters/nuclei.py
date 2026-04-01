@@ -16,7 +16,7 @@ class NucleiAdapter(BaseAdapter):
     BINARY_NAMES = ["nuclei"]
     OUTPUT_FORMAT = OutputFormat.JSON_LINES
     PRODUCES = "finding"
-    SCOPE_MODE = "pre"
+    SCOPE_MODE = "both"
 
     def install_hint(self) -> str:
         return "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"

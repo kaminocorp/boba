@@ -132,6 +132,42 @@ class TestListSessionsDeepCopy:
         assert "injected" not in fresh.cookies
 
 
+class TestLoginDeepCopy:
+    """Fix 2: login_* methods must return deep copies so callers cannot mutate the cache."""
+
+    def test_login_bearer_returns_deep_copy(self, mgr):
+        mgr.create("api_user", "https://api.example.com")
+        state = mgr.login_bearer("api_user", "tok_abc123")
+        # Mutate the returned object
+        state.headers["X-Evil"] = "injected"
+        state.tokens["backdoor"] = "yes"
+        # Cache must be unaffected
+        fresh = mgr.get("api_user")
+        assert "X-Evil" not in fresh.headers
+        assert "backdoor" not in fresh.tokens
+
+    def test_login_basic_returns_deep_copy(self, mgr):
+        mgr.create("basic_user", "https://app.example.com")
+        state = mgr.login_basic("basic_user", "admin", "password")
+        state.headers["X-Evil"] = "injected"
+        fresh = mgr.get("basic_user")
+        assert "X-Evil" not in fresh.headers
+
+    def test_login_cookies_returns_deep_copy(self, mgr):
+        mgr.create("cookie_user", "https://app.example.com")
+        state = mgr.login_cookies("cookie_user", {"session": "abc"})
+        state.cookies["injected"] = "evil"
+        fresh = mgr.get("cookie_user")
+        assert "injected" not in fresh.cookies
+
+    def test_login_header_returns_deep_copy(self, mgr):
+        mgr.create("header_user", "https://api.example.com")
+        state = mgr.login_header("header_user", "X-API-Key", "secret")
+        state.headers["X-Evil"] = "injected"
+        fresh = mgr.get("header_user")
+        assert "X-Evil" not in fresh.headers
+
+
 class TestPersistence:
     def test_session_survives_new_manager(self, context, hunt_id):
         """Session created by one manager instance can be read by another."""

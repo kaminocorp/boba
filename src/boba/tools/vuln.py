@@ -697,6 +697,20 @@ async def test_sqli(
                 # A SLEEP(5) payload should add ≥3s over the median baseline
                 delay_ms = resp_time.elapsed_ms - baseline_median
                 if delay_ms >= 3000:
+                    # Confirmation: re-send the same payload — both must be slow
+                    resp_confirm = await http_client.request(
+                        method=method,
+                        url=test_url,
+                        headers=headers,
+                        cookies=cookies,
+                        source="test_sqli",
+                        tags=["sqli", "time_confirm"],
+                        timeout_seconds=15.0,
+                    )
+                    request_ids.append(resp_confirm.request_id)
+                    confirm_delay = resp_confirm.elapsed_ms - baseline_median
+                    if confirm_delay < 3000:
+                        continue  # First hit was a network fluke
                     vulnerable = True
                     confidence = Confidence.LIKELY
                     evidence.append(
@@ -706,7 +720,9 @@ async def test_sqli(
                             "param": param_name,
                             "baseline_median_ms": baseline_median,
                             "response_ms": resp_time.elapsed_ms,
+                            "confirm_ms": resp_confirm.elapsed_ms,
                             "delay_ms": delay_ms,
+                            "confirm_delay_ms": confirm_delay,
                             "request_id": resp_time.request_id,
                         }
                     )
@@ -894,7 +910,7 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
     if body_a == body_b:
         return True
     if not body_a or not body_b:
-        return False
+        return not body_a and not body_b
     # Length-ratio heuristic — bodies must be similar length
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
     if len_ratio < threshold:

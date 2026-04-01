@@ -353,6 +353,43 @@ class TestNucleiAdapterBuildCommand:
         assert "-headless" in cmd
 
 
+class TestNucleiScanTemplateIdAsParameter:
+    """Fix 1: Two different template_ids for the same URL must both persist."""
+
+    async def test_two_templates_same_url_both_persisted(self, manager, sample_hunt):
+        """nuclei_scan with two findings for the same URL but different template_ids
+        should persist both findings (template_id is used as `parameter` to avoid collision)."""
+        adapter = NucleiAdapter(scope_engine=None)
+
+        raw_finding_a = {
+            **NUCLEI_RAW_FINDING,
+            "template-id": "cve-2021-44228",
+            "info": {**NUCLEI_RAW_FINDING["info"], "name": "Log4j RCE"},
+        }
+        raw_finding_b = {
+            **NUCLEI_RAW_FINDING,
+            "template-id": "cve-2022-99999",
+            "info": {**NUCLEI_RAW_FINDING["info"], "name": "Other RCE"},
+        }
+        records = [
+            adapter.parse_record(raw_finding_a),
+            adapter.parse_record(raw_finding_b),
+        ]
+        mock_run = AsyncMock(return_value=_make_result("nuclei", records))
+
+        with patch("boba.tools.scan.NucleiAdapter.run", mock_run):
+            result = await scan.nuclei_scan(
+                manager.context, sample_hunt, ["https://api.example.com"]
+            )
+
+        assert len(result.records) == 2
+        saved = manager.context.get_findings(sample_hunt.id)
+        assert len(saved) == 2
+        titles = {f["title"] for f in saved}
+        assert any("cve-2021-44228" in t for t in titles)
+        assert any("cve-2022-99999" in t for t in titles)
+
+
 class TestNucleiAdapterMetadata:
     def test_tool_name(self):
         assert NucleiAdapter.TOOL_NAME == "nuclei"
@@ -361,7 +398,7 @@ class TestNucleiAdapterMetadata:
         assert NucleiAdapter.PRODUCES == "finding"
 
     def test_scope_mode(self):
-        assert NucleiAdapter.SCOPE_MODE == "pre"
+        assert NucleiAdapter.SCOPE_MODE == "both"
 
     def test_install_hint(self):
         adapter = NucleiAdapter(scope_engine=None)

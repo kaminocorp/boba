@@ -121,6 +121,25 @@ class TestHuntStateTransitions:
             manager.close(hunt.id)
 
 
+class TestHuntManagerContextManager:
+    """Fix 8: HuntManager supports context manager protocol (__enter__/__exit__)."""
+
+    def test_with_statement_works(self, tmp_db):
+        with HuntManager(db_path=tmp_db) as mgr:
+            hunt = mgr.create(name="ctx-mgr-test")
+            assert hunt.name == "ctx-mgr-test"
+        # After exiting, the context should be closed.
+        # Verify by attempting an operation that requires an open connection.
+        with pytest.raises(Exception):
+            mgr.create(name="should-fail")
+
+    def test_context_manager_returns_self(self, tmp_db):
+        mgr = HuntManager(db_path=tmp_db)
+        with mgr as entered:
+            assert entered is mgr
+        # Clean — no double-close errors
+
+
 class TestHuntStats:
     def test_stats_empty_hunt(self, manager):
         hunt = manager.create(name="empty-stats")

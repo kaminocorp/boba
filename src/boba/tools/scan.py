@@ -54,7 +54,8 @@ async def nuclei_scan(
     adapter = NucleiAdapter(scope_engine=scope)
     result = await adapter.run(targets=targets, config=config)
 
-    # Persist findings
+    # Persist findings — use template_id as parameter to avoid collisions when
+    # multiple templates match the same URL (unique key is hunt_id+type+url+param)
     for record in result.records:
         context.upsert_finding(
             hunt.id,
@@ -64,6 +65,7 @@ async def nuclei_scan(
                 "title": f"[{record.get('template_id', '')}] {record.get('template_name', '')}",
                 "description": record.get("description", ""),
                 "url": record.get("url", ""),
+                "parameter": record.get("template_id", ""),
                 "template_id": record.get("template_id"),
                 "tags": record.get("tags", []),
             },
