@@ -58,6 +58,50 @@ def _safe_close_http(client) -> None:
         pass
 
 
+def _get_http_client(manager, hunt_id: str):
+    """Create an HttpClient with history sink for a hunt. Returns (client, sink)."""
+    from boba.interaction.history import HttpHistorySink
+    from boba.interaction.http import HttpClient
+
+    manager.get(hunt_id)
+    sink = HttpHistorySink(manager.context, hunt_id)
+    return HttpClient(sink)
+
+
+def _get_browser_manager(manager, hunt_id: str):
+    """Create a BrowserManager with history sink for a hunt."""
+    from boba.core.models import BrowserConfig
+    from boba.interaction.browser import BrowserManager
+    from boba.interaction.history import HttpHistorySink
+
+    manager.get(hunt_id)
+    sink = HttpHistorySink(manager.context, hunt_id)
+    config = BrowserConfig(headless=True)
+    return BrowserManager(config, sink)
+
+
+def _get_session_manager(manager, hunt_id: str):
+    """Create a SessionManager for a hunt."""
+    from boba.interaction.session import SessionManager
+
+    manager.get(hunt_id)
+    return SessionManager(manager.context, hunt_id)
+
+
+def _parse_headers(header_list: list[str] | None) -> dict[str, str]:
+    """Parse CLI header arguments (KEY:VALUE) into a dict."""
+    if not header_list:
+        return {}
+    headers: dict[str, str] = {}
+    for h in header_list:
+        if ":" not in h:
+            print_error(f"Invalid header format: '{h}' (expected KEY:VALUE)")
+            raise typer.Exit(1)
+        k, v = h.split(":", 1)
+        headers[k.strip()] = v.strip()
+    return headers
+
+
 # ═══════════════════ HUNT COMMANDS ═══════════════════
 
 hunt_app = typer.Typer(help="Hunt lifecycle management.")
@@ -429,6 +473,43 @@ def enum_directories(
         _safe_close(manager)
 
 
+@enum_app.command("crawl")
+def enum_crawl(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")
+    ] = None,
+    depth: Annotated[str, typer.Option("--depth", "-d", help="Crawl depth")] = "3",
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Crawl web applications using katana."""
+    manager = _get_manager(data_dir)
+    try:
+        from boba.tools import enum
+
+        hunt = manager.get(hunt_id)
+        target_list = [t.strip() for t in targets.split(",")] if targets else None
+        result = asyncio.run(enum.crawl(manager.context, hunt, target_list, depth))
+        if fmt == "json":
+            format_output(
+                {"tool": "katana", "found": len(result.records), "records": result.records},
+                fmt="json",
+            )
+        else:
+            format_output(
+                result.records,
+                fmt="table",
+                columns=["url", "host", "path", "source"],
+                title="Crawled URLs",
+            )
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
+    finally:
+        _safe_close(manager)
+
+
 # ═══════════════════ CONTEXT COMMANDS ═══════════════════
 
 context_app = typer.Typer(help="Query discovered data.")
@@ -630,14 +711,7 @@ def browser_navigate(
     """Navigate to a URL and capture traffic."""
     manager = _get_manager(data_dir)
     try:
-        from boba.core.models import BrowserConfig
-        from boba.interaction.browser import BrowserManager
-        from boba.interaction.history import HttpHistorySink
-
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        config = BrowserConfig(headless=True)
-        browser = BrowserManager(config, sink)
+        browser = _get_browser_manager(manager, hunt_id)
 
         async def _run():
             await browser.start()
@@ -676,14 +750,7 @@ def browser_screenshot(
     """Take a screenshot of a web page."""
     manager = _get_manager(data_dir)
     try:
-        from boba.core.models import BrowserConfig
-        from boba.interaction.browser import BrowserManager
-        from boba.interaction.history import HttpHistorySink
-
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        config = BrowserConfig(headless=True)
-        browser = BrowserManager(config, sink)
+        browser = _get_browser_manager(manager, hunt_id)
 
         async def _run():
             await browser.start()
@@ -712,15 +779,9 @@ def browser_extract(
     """Extract structured DOM data from a page."""
     manager = _get_manager(data_dir)
     try:
-        from boba.core.models import BrowserConfig
-        from boba.interaction.browser import BrowserManager
-        from boba.interaction.history import HttpHistorySink
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        config = BrowserConfig(headless=True)
-        browser = BrowserManager(config, sink)
+        browser = _get_browser_manager(manager, hunt_id)
 
         async def _run():
             await browser.start()
@@ -761,21 +822,8 @@ def http_request(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
-
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
-
-        headers = {}
-        if header:
-            for h in header:
-                if ":" not in h:
-                    print_error(f"Invalid header format: '{h}' (expected KEY:VALUE)")
-                    raise typer.Exit(1)
-                k, v = h.split(":", 1)
-                headers[k.strip()] = v.strip()
+        client = _get_http_client(manager, hunt_id)
+        headers = _parse_headers(header)
 
         resp = asyncio.run(
             client.request(
@@ -820,23 +868,11 @@ def http_replay(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
-
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         modifications: dict = {}
         if modify_header:
-            headers = {}
-            for h in modify_header:
-                if ":" not in h:
-                    print_error(f"Invalid header format: '{h}' (expected KEY:VALUE)")
-                    raise typer.Exit(1)
-                k, v = h.split(":", 1)
-                headers[k.strip()] = v.strip()
-            modifications["headers"] = headers
+            modifications["headers"] = _parse_headers(modify_header)
         if modify_body:
             modifications["body"] = modify_body
 
@@ -871,13 +907,9 @@ def http_compare(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(client.compare(id_a, id_b))
         format_output(asdict(result), fmt=fmt, title="Response Comparison")
@@ -908,7 +940,6 @@ def session_create(
     manager = _get_manager(data_dir)
     try:
         from boba.core.models import AuthMethod
-        from boba.interaction.session import SessionManager
 
         try:
             auth_method = AuthMethod(method)
@@ -916,8 +947,7 @@ def session_create(
             valid = [m.value for m in AuthMethod]
             print_error(f"Invalid auth method '{method}'. Valid: {valid}")
             raise typer.Exit(1)
-        manager.get(hunt_id)
-        mgr = SessionManager(manager.context, hunt_id)
+        mgr = _get_session_manager(manager, hunt_id)
         state = mgr.create(name, target, auth_method)
         if fmt == "json":
             format_output(
@@ -949,10 +979,7 @@ def session_login_token(
     """Set a Bearer token on a session."""
     manager = _get_manager(data_dir)
     try:
-        from boba.interaction.session import SessionManager
-
-        manager.get(hunt_id)
-        mgr = SessionManager(manager.context, hunt_id)
+        mgr = _get_session_manager(manager, hunt_id)
         mgr.login_bearer(name, token)
         print_success(f"Bearer token set on session '{name}'")
     except Exception as e:
@@ -971,10 +998,7 @@ def session_list(
     """List all sessions."""
     manager = _get_manager(data_dir)
     try:
-        from boba.interaction.session import SessionManager
-
-        manager.get(hunt_id)
-        mgr = SessionManager(manager.context, hunt_id)
+        mgr = _get_session_manager(manager, hunt_id)
         sessions = mgr.list_sessions()
         records = [
             {
@@ -1002,10 +1026,7 @@ def session_delete(
     """Delete a session."""
     manager = _get_manager(data_dir)
     try:
-        from boba.interaction.session import SessionManager
-
-        manager.get(hunt_id)
-        mgr = SessionManager(manager.context, hunt_id)
+        mgr = _get_session_manager(manager, hunt_id)
         mgr.delete(name)
         print_success(f"Session '{name}' deleted")
     except Exception as e:
@@ -1096,16 +1117,11 @@ def test_idor_cmd(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
-        from boba.interaction.session import SessionManager
         from boba.tools import vuln
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
-        sess_mgr = SessionManager(manager.context, hunt_id)
+        client = _get_http_client(manager, hunt_id)
+        sess_mgr = _get_session_manager(manager, hunt_id)
         sa = sess_mgr.get(session_a)
         sb = sess_mgr.get(session_b)
         if not sa or not sb:
@@ -1137,14 +1153,10 @@ def test_ssrf_cmd(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
         from boba.tools import vuln
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_ssrf(
@@ -1176,14 +1188,10 @@ def test_xss_cmd(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
         from boba.tools import vuln
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_xss(
@@ -1215,14 +1223,10 @@ def test_sqli_cmd(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
         from boba.tools import vuln
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(
             vuln.test_sqli(
@@ -1253,14 +1257,10 @@ def test_auth_cmd(
     manager = _get_manager(data_dir)
     client = None
     try:
-        from boba.interaction.history import HttpHistorySink
-        from boba.interaction.http import HttpClient
         from boba.tools import vuln
         from dataclasses import asdict
 
-        manager.get(hunt_id)
-        sink = HttpHistorySink(manager.context, hunt_id)
-        client = HttpClient(sink)
+        client = _get_http_client(manager, hunt_id)
 
         result = asyncio.run(vuln.test_auth(client, endpoint, jwt_token=jwt))
         format_output(asdict(result), fmt=fmt, title="Auth Test Result")

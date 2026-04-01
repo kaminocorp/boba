@@ -113,7 +113,9 @@ class TestNucleiScan:
         config_used = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         if config_used is None:
             # Adapter.run is called as run(targets=..., config=...) positionally
-            config_used = call_kwargs[0][1] if len(call_kwargs[0]) > 1 else call_kwargs.kwargs["config"]
+            config_used = (
+                call_kwargs[0][1] if len(call_kwargs[0]) > 1 else call_kwargs.kwargs["config"]
+            )
         assert config_used.extra_args_dict["severity"] == "critical,high"
 
     async def test_nuclei_scan_tags_filter(self, manager, sample_hunt):
@@ -174,9 +176,7 @@ class TestNucleiScan:
         mock_run = AsyncMock(return_value=_make_result("nuclei", [parsed]))
 
         with patch("boba.tools.scan.NucleiAdapter.run", mock_run):
-            await scan.nuclei_scan(
-                manager.context, sample_hunt, ["https://api.example.com"]
-            )
+            await scan.nuclei_scan(manager.context, sample_hunt, ["https://api.example.com"])
 
         runs = manager.context.get_tool_runs(sample_hunt.id)
         assert any(r["tool_name"] == "nuclei" for r in runs)

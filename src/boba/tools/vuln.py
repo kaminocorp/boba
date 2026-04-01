@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 import re
+from html import unescape as html_unescape
 from urllib.parse import quote, unquote, urlencode, urlparse, parse_qs, urlunparse
 
 from boba.core.models import (
@@ -276,9 +277,17 @@ async def test_ssrf(
             if resp.status_code == 200 and "169.254.169.254" in payload:
                 body_lower = resp.body_text.lower()
                 metadata_signals = (
-                    "ami-id", "instance-id", "iam", "security-credentials",
-                    "hostname", "local-ipv4", "public-ipv4", "meta-data",
-                    "computeMetadata", "instance/", "project/",
+                    "ami-id",
+                    "instance-id",
+                    "iam",
+                    "security-credentials",
+                    "hostname",
+                    "local-ipv4",
+                    "public-ipv4",
+                    "meta-data",
+                    "computeMetadata",
+                    "instance/",
+                    "project/",
                 )
                 has_metadata_content = any(sig.lower() in body_lower for sig in metadata_signals)
                 if has_metadata_content:
@@ -332,6 +341,10 @@ async def test_ssrf(
                 evidence.append(
                     {
                         "type": "oob_callback",
+                        "listener_id": i.get("listener_id"),
+                        "purpose": i.get("purpose"),
+                        "target_url": i.get("target_url"),
+                        "parameter": i.get("parameter"),
                         "interaction": i,
                     }
                 )
@@ -423,6 +436,23 @@ async def test_xss(
                     }
                 )
                 break
+
+            # Check for HTML-entity-encoded reflection (e.g. <script> → &lt;script&gt;)
+            html_decoded = html_unescape(resp.body_text)
+            if html_decoded != resp.body_text and payload in html_decoded:
+                # Payload present after HTML entity decoding — server is encoding
+                # output, which is actually a defense. Mark as POSSIBLE, not CONFIRMED.
+                evidence.append(
+                    {
+                        "type": "reflected_html_encoded",
+                        "payload": payload,
+                        "param": param_name,
+                        "note": "Payload reflected with HTML entity encoding (output is escaped)",
+                        "request_id": resp.request_id,
+                    }
+                )
+                # Don't set vulnerable=True — entity encoding is a mitigation.
+                # But track it as evidence for potential bypass analysis.
 
             # Check for partial reflection: extract inner content between tags
             # e.g. "<script>alert(1)</script>" → check for "alert(1)"
@@ -815,28 +845,57 @@ async def test_auth(
     )
 
 
+def _extract_json_keys(data: Any, prefix: str = "") -> set[str]:
+    """Extract the set of key paths from a JSON structure for structural comparison."""
+    keys: set[str] = set()
+    if isinstance(data, dict):
+        for k, v in data.items():
+            path = f"{prefix}.{k}" if prefix else k
+            keys.add(path)
+            keys.update(_extract_json_keys(v, path))
+    elif isinstance(data, list):
+        keys.add(f"{prefix}[]")
+        if data:
+            keys.update(_extract_json_keys(data[0], f"{prefix}[]"))
+    return keys
+
+
 def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> bool:
     """Check if two response bodies are similar enough to indicate same content.
 
-    Uses both exact content hash comparison and length-ratio heuristic.
-    This prevents false positives from two different resources that happen
-    to be the same length.
+    Uses exact comparison, then JSON-aware structural comparison for JSON bodies
+    (comparing key paths rather than values), then falls back to line-based
+    overlap for non-JSON content.
 
-    JSON structural lines (braces, brackets, commas) are excluded from the
-    overlap calculation to avoid false positives on same-shape JSON with
-    different values (e.g., /api/me returning per-user data).
+    This prevents false positives from per-user JSON endpoints (/api/me) where
+    the structure is identical but values differ, while still catching true
+    similarity in non-JSON responses.
     """
     if body_a == body_b:
         return True
     if not body_a or not body_b:
         return False
-    # Length-ratio heuristic — bodies must be similar length AND share structural overlap
+    # Length-ratio heuristic — bodies must be similar length
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
     if len_ratio < threshold:
         return False
-    # Check for structural overlap: shared lines as a fraction of total unique lines.
-    # Exclude JSON structural-only lines (braces, brackets) that inflate overlap
-    # on same-shape JSON responses with different values.
+
+    # Try JSON-aware comparison: if both parse as JSON, compare key structure
+    import json as _json
+
+    try:
+        json_a = _json.loads(body_a)
+        json_b = _json.loads(body_b)
+        keys_a = _extract_json_keys(json_a)
+        keys_b = _extract_json_keys(json_b)
+        if keys_a and keys_b:
+            # Same JSON structure = similar (values differ, shape matches)
+            key_overlap = len(keys_a & keys_b) / max(len(keys_a | keys_b), 1)
+            return key_overlap >= threshold
+    except (ValueError, TypeError):
+        pass
+
+    # Non-JSON fallback: line-based overlap excluding JSON structural lines
     lines_a = {ln for ln in body_a.split(b"\n") if not _JSON_STRUCTURAL_RE.match(ln)}
     lines_b = {ln for ln in body_b.split(b"\n") if not _JSON_STRUCTURAL_RE.match(ln)}
     if not lines_a or not lines_b:

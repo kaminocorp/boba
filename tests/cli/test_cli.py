@@ -150,9 +150,7 @@ def _insert_manager(tmp_path):
 class TestContextSubdomains:
     def test_subdomains_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(
-            app, ["context", "subdomains", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "subdomains", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
 
     def test_subdomains_with_data(self, tmp_path):
@@ -168,9 +166,7 @@ class TestContextSubdomains:
         )
         mgr.close_context()
 
-        result = runner.invoke(
-            app, ["context", "subdomains", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "subdomains", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
         assert "api.example.com" in result.output
         assert "web.example.com" in result.output
@@ -416,9 +412,7 @@ class TestContextHttpHistory:
 class TestContextFindings:
     def test_findings_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(
-            app, ["context", "findings", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "findings", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
 
     def test_findings_with_data(self, tmp_path):
@@ -437,9 +431,7 @@ class TestContextFindings:
         )
         mgr.close_context()
 
-        result = runner.invoke(
-            app, ["context", "findings", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "findings", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
         assert "xss" in result.output.lower() or "XSS" in result.output
 
@@ -471,9 +463,7 @@ class TestContextFindings:
 class TestContextSessions:
     def test_sessions_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(
-            app, ["context", "sessions", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "sessions", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
 
     def test_sessions_with_data(self, tmp_path):
@@ -493,9 +483,7 @@ class TestContextSessions:
         )
         mgr.close_context()
 
-        result = runner.invoke(
-            app, ["context", "sessions", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["context", "sessions", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
         assert "admin-session" in result.output
 
@@ -538,9 +526,13 @@ class TestReconSubdomainsCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "subdomains", hunt_id,
-                    "--domain", "example.com",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "subdomains",
+                    hunt_id,
+                    "--domain",
+                    "example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -554,10 +546,15 @@ class TestReconSubdomainsCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "subdomains", hunt_id,
-                    "--domain", "example.com",
-                    "--format", "json",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "subdomains",
+                    hunt_id,
+                    "--domain",
+                    "example.com",
+                    "--format",
+                    "json",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -574,9 +571,13 @@ class TestReconHostsCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "hosts", hunt_id,
-                    "--targets", "api.example.com,web.example.com",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "hosts",
+                    hunt_id,
+                    "--targets",
+                    "api.example.com,web.example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -609,9 +610,13 @@ class TestReconPortsCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "ports", hunt_id,
-                    "--targets", "api.example.com",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "ports",
+                    hunt_id,
+                    "--targets",
+                    "api.example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -639,9 +644,13 @@ class TestReconUrlsCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "urls", hunt_id,
-                    "--domain", "example.com",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "urls",
+                    hunt_id,
+                    "--domain",
+                    "example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -656,9 +665,13 @@ class TestReconTechCLI:
             result = runner.invoke(
                 app,
                 [
-                    "recon", "tech", hunt_id,
-                    "--targets", "https://example.com",
-                    "--data-dir", str(tmp_path),
+                    "recon",
+                    "tech",
+                    hunt_id,
+                    "--targets",
+                    "https://example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -681,17 +694,19 @@ class TestReconTechCLI:
 class TestEnumDirectoriesCLI:
     def test_enum_directories(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        records = [
-            {"url": "https://example.com/admin", "status_code": 200, "content_length": 500}
-        ]
+        records = [{"url": "https://example.com/admin", "status_code": 200, "content_length": 500}]
         mock_fn = AsyncMock(return_value=_make_result("ffuf", records))
         with patch("boba.tools.enum.directories", mock_fn):
             result = runner.invoke(
                 app,
                 [
-                    "enum", "directories", hunt_id,
-                    "--url", "https://example.com/FUZZ",
-                    "--data-dir", str(tmp_path),
+                    "enum",
+                    "directories",
+                    hunt_id,
+                    "--url",
+                    "https://example.com/FUZZ",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -704,10 +719,15 @@ class TestEnumDirectoriesCLI:
             result = runner.invoke(
                 app,
                 [
-                    "enum", "directories", hunt_id,
-                    "--url", "https://example.com/FUZZ",
-                    "--format", "json",
-                    "--data-dir", str(tmp_path),
+                    "enum",
+                    "directories",
+                    hunt_id,
+                    "--url",
+                    "https://example.com/FUZZ",
+                    "--format",
+                    "json",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -734,9 +754,13 @@ class TestScanNucleiCLI:
             result = runner.invoke(
                 app,
                 [
-                    "scan", "nuclei", hunt_id,
-                    "--targets", "https://example.com",
-                    "--data-dir", str(tmp_path),
+                    "scan",
+                    "nuclei",
+                    hunt_id,
+                    "--targets",
+                    "https://example.com",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -762,10 +786,15 @@ class TestScanNucleiCLI:
             result = runner.invoke(
                 app,
                 [
-                    "scan", "nuclei", hunt_id,
-                    "--targets", "https://e.com",
-                    "--format", "json",
-                    "--data-dir", str(tmp_path),
+                    "scan",
+                    "nuclei",
+                    hunt_id,
+                    "--targets",
+                    "https://e.com",
+                    "--format",
+                    "json",
+                    "--data-dir",
+                    str(tmp_path),
                 ],
             )
         assert result.exit_code == 0
@@ -782,10 +811,15 @@ class TestSessionCreateCLI:
         result = runner.invoke(
             app,
             [
-                "session", "create", hunt_id,
-                "--name", "attacker",
-                "--target", "https://example.com",
-                "--data-dir", str(tmp_path),
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "attacker",
+                "--target",
+                "https://example.com",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
         assert result.exit_code == 0
@@ -796,11 +830,17 @@ class TestSessionCreateCLI:
         result = runner.invoke(
             app,
             [
-                "session", "create", hunt_id,
-                "--name", "test",
-                "--target", "https://example.com",
-                "--method", "invalid_method",
-                "--data-dir", str(tmp_path),
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "test",
+                "--target",
+                "https://example.com",
+                "--method",
+                "invalid_method",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
         assert result.exit_code == 1
@@ -810,11 +850,17 @@ class TestSessionCreateCLI:
         result = runner.invoke(
             app,
             [
-                "session", "create", hunt_id,
-                "--name", "owner",
-                "--target", "https://example.com",
-                "--format", "json",
-                "--data-dir", str(tmp_path),
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "owner",
+                "--target",
+                "https://example.com",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
         assert result.exit_code == 0
@@ -825,9 +871,7 @@ class TestSessionCreateCLI:
 class TestSessionListCLI:
     def test_session_list_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(
-            app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
 
     def test_session_list_after_create(self, tmp_path):
@@ -835,15 +879,18 @@ class TestSessionListCLI:
         runner.invoke(
             app,
             [
-                "session", "create", hunt_id,
-                "--name", "my-session",
-                "--target", "https://example.com",
-                "--data-dir", str(tmp_path),
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "my-session",
+                "--target",
+                "https://example.com",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
-        result = runner.invoke(
-            app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["session", "list", hunt_id, "--data-dir", str(tmp_path)])
         assert result.exit_code == 0
         assert "my-session" in result.output
 
@@ -854,10 +901,15 @@ class TestSessionDeleteCLI:
         runner.invoke(
             app,
             [
-                "session", "create", hunt_id,
-                "--name", "to-delete",
-                "--target", "https://example.com",
-                "--data-dir", str(tmp_path),
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "to-delete",
+                "--target",
+                "https://example.com",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
         result = runner.invoke(
@@ -877,10 +929,15 @@ class TestHttpHeaderValidation:
         result = runner.invoke(
             app,
             [
-                "http", "request", hunt_id,
-                "--url", "https://example.com",
-                "--header", "BadHeader",
-                "--data-dir", str(tmp_path),
+                "http",
+                "request",
+                hunt_id,
+                "--url",
+                "https://example.com",
+                "--header",
+                "BadHeader",
+                "--data-dir",
+                str(tmp_path),
             ],
         )
         assert result.exit_code == 1

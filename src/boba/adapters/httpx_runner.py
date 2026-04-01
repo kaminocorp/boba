@@ -8,6 +8,16 @@ from boba.adapters.base import BaseAdapter
 from boba.core.models import AdapterConfig, OutputFormat
 
 
+def _safe_int(value: Any) -> int | None:
+    """Safely convert a value to int, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
 class HttpxRunnerAdapter(BaseAdapter):
     TOOL_NAME = "httpx"
     BINARY_NAMES = ["httpx"]
@@ -45,7 +55,7 @@ class HttpxRunnerAdapter(BaseAdapter):
         return {
             "host": raw.get("input", ""),
             "ip": a_records[0] if a_records else raw.get("host", ""),
-            "port": int(raw["port"]) if raw.get("port") is not None else None,
+            "port": _safe_int(raw.get("port")),
             "scheme": raw.get("scheme", ""),
             "url": raw.get("url", ""),
             "status_code": raw.get("status_code"),

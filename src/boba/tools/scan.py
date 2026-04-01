@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 
 from boba.adapters.nuclei import NucleiAdapter
@@ -41,7 +42,7 @@ async def nuclei_scan(
             records=[],
         )
 
-    config = config or AdapterConfig()
+    config = copy.deepcopy(config) if config else AdapterConfig()
     if severity:
         config.extra_args_dict["severity"] = severity
     if tags:

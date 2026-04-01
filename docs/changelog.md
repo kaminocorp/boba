@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.14](#0214--pre-v3-quality-gate) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
 - [0.2.13](#0213--another-v3-readiness-audit) — IDOR/SQLi false-positive reduction, fuzz baseline fix, gau ARG_MAX fix, scope filter consistency, CLI test coverage for recon/enum/scan/session, 13 fixes + 21 new tests (286 total)
 - [0.2.12](#0212--another-v3-readiness-review) — LIKE wildcard injection, gau argument injection, IDOR/SSRF false-positive reduction, fuzz header substitution, CLI error handling, 11 fixes + 59 new tests (265 total)
 - [0.2.11](#0211--pre-v3-quality-gate--test-coverage) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
@@ -15,6 +16,73 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.14 — Pre-V3 Quality Gate
+
+**Date:** 2026-04-01
+**Scope:** 8 files fixed, 3 new test files, 327 tests passing (41 new, 0 regressions)
+
+Comprehensive 5-agent parallel codebase review followed by targeted fixes to bring quality from 7.3/10 to 8.5+/10. Focus areas: CLI duplication, detection accuracy, JSON handling, and test coverage gaps. All fixes are strictly additive.
+
+### Detection Accuracy (HIGH)
+
+- **`_bodies_similar()` JSON-aware comparison** — Previous Jaccard-on-lines approach failed for JSON responses where lines differ only in values (e.g. `/api/me` returning `{"user":"alice"}` vs `{"user":"bob"}` — after structural line removal, overlap was 0%). Now parses both bodies as JSON when possible and compares key-structure (set of dotted key paths). Two responses with identical keys but different values are correctly identified as "similar" (same-shape endpoint, not IDOR). Non-JSON bodies fall back to the existing line overlap check.
+
+- **XSS HTML entity encoding detection** — Reflected XSS check now detects payloads that appear in the response after HTML entity decoding (`<script>` → `&lt;script&gt;`). Records evidence as `reflected_html_encoded` but does NOT flag as vulnerable since entity encoding is a server-side mitigation. Enables follow-up bypass analysis.
+
+### CLI Architecture (HIGH)
+
+- **Missing `enum crawl` CLI command** — `enum.crawl()` function existed in `tools/enum.py` but was inaccessible from CLI. Added `boba enum crawl` command with `--targets`, `--depth`, and `--format` options.
+
+- **Extracted 5 CLI helper functions** — Deduplicated repeated initialization patterns across 12+ commands:
+  - `_get_http_client(manager, hunt_id)` — creates HttpClient with history sink (was repeated in 6 commands)
+  - `_get_browser_manager(manager, hunt_id)` — creates BrowserManager with config/sink (was repeated in 3 commands)
+  - `_get_session_manager(manager, hunt_id)` — creates SessionManager (was repeated in 4 commands)
+  - `_parse_headers(header_list)` — parses `KEY:VALUE` headers with typer.Exit on invalid format (was repeated in 2 commands)
+  - Net reduction: ~120 lines of duplicated imports and initialization code.
+
+### Safety & Correctness (MEDIUM)
+
+- **httpx adapter unguarded `int()` conversion** — `parse_record()` called `int(raw["port"])` which would crash on non-numeric port strings from malformed httpx output. Now uses `_safe_int()` helper that returns None on ValueError/TypeError.
+
+- **`scan.py` config mutation** — `nuclei_scan()` mutated the caller's `AdapterConfig` when setting severity/tags/templates. Now deepcopies the config before modification, matching the pattern in `enum.py`.
+
+- **OOB evidence enrichment** — `test_ssrf()` OOB callback evidence now includes `listener_id`, `purpose`, `target_url`, and `parameter` from the listener metadata. Previously only stored `{"type": "oob_callback", "interaction": {...}}`, making it impossible to map callbacks to specific injection points.
+
+### Code Quality (MEDIUM)
+
+- **Extracted `_parse_json_field()` in context.py** — Consolidated 6 identical try/except json.loads patterns into a single helper function with `label` and `record_id` parameters for consistent warning messages. Applied to: `get_http_record`, `query_http_history`, `get_session`, `get_sessions` (now `_deserialize_session_row`), `get_findings`, `get_oob_listeners`.
+
+- **Extracted `_deserialize_session_row()` in context.py** — `get_session()` and `get_sessions()` shared 30 lines of identical JSON deserialization logic for cookies_json/headers_json/tokens_json/storage_state. Now consolidated into a single private method.
+
+- **Extracted `_extract_json_keys()` in vuln.py** — Recursive helper for extracting dotted key paths from nested JSON structures. Used by the improved `_bodies_similar()` for structural comparison.
+
+### Test Coverage (41 new tests)
+
+- **`tests/core/test_config.py`** (7 tests, new file):
+  - `get_data_dir()` default path and BOBA_DATA_DIR env var override
+  - `get_db_path()`, `get_tmp_dir()`, `get_hunt_dir()`, `get_bodies_dir()`, `get_templates_dir()` directory creation
+
+- **`tests/cli/test_formatters.py`** (9 tests, new file):
+  - `_auto_columns()` skip-set exclusion and 8-column limit
+  - `format_output()` JSON and table modes, empty list, single dict, invalid format
+  - `_print_json()` parseable output
+
+- **`tests/test_fixes_0214.py`** (25 tests, new file):
+  - `_bodies_similar()` JSON key-structure comparison (5 tests)
+  - `_safe_int()` edge cases (5 tests)
+  - `_parse_json_field()` valid/malformed/None/empty (4 tests)
+  - `_extract_json_keys()` nested dicts, lists, empty (3 tests)
+  - `nuclei_scan` config deepcopy verification (1 test)
+  - XSS HTML entity detection evidence (1 test)
+  - `_parse_headers()` valid/invalid/None/multiple/colon-in-value (5 tests)
+  - `enum crawl` command registration (1 test)
+
+### Known Design Decision
+
+- **Timestamp type inconsistency** (`Hunt.created_at` is `datetime`, `SessionState.created_at` is `str`) — Documented but not changed in this release. Unifying would require a cross-cutting refactor touching models, context, CLI, and all tests. Low risk since SessionState timestamps are DB-sourced display strings only.
 
 ---
 

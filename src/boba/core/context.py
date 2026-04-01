@@ -26,6 +26,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _parse_json_field(
+    value: str | None, default: str = "{}", *, label: str = "field", record_id: Any = "?"
+) -> Any:
+    """Parse a JSON field with fallback, logging warnings on malformed data."""
+    try:
+        return json.loads(value or default)
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("Malformed %s in record %s: %s", label, record_id, exc)
+        return json.loads(default)
+
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS hunts (
     id          TEXT PRIMARY KEY,
@@ -803,11 +814,9 @@ class HuntContext:
             ("response_headers", "{}"),
             ("tags", "[]"),
         ]:
-            try:
-                result[field] = json.loads(result[field] or default)
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed %s in http_history %d: %s", field, record_id, exc)
-                result[field] = json.loads(default)
+            result[field] = _parse_json_field(
+                result[field], default, label=field, record_id=record_id
+            )
         return result
 
     def query_http_history(
@@ -853,16 +862,13 @@ class HuntContext:
         results = []
         for row in rows:
             r = dict(row)
+            rid = r.get("id", "?")
             for field, default in [
                 ("request_headers", "{}"),
                 ("response_headers", "{}"),
                 ("tags", "[]"),
             ]:
-                try:
-                    r[field] = json.loads(r[field] or default)
-                except (json.JSONDecodeError, TypeError) as exc:
-                    logger.warning("Malformed %s in http_history %d: %s", field, r.get("id"), exc)
-                    r[field] = json.loads(default)
+                r[field] = _parse_json_field(r[field], default, label=field, record_id=rid)
             results.append(r)
         return results
 
@@ -925,72 +931,33 @@ class HuntContext:
         ).fetchone()
         if not row:
             return None
-        result = dict(row)
-        try:
-            result["cookies"] = json.loads(result.pop("cookies_json", "{}"))
-        except (json.JSONDecodeError, TypeError) as exc:
-            logger.warning("Malformed cookies_json for session %s/%s: %s", hunt_id, name, exc)
-            result.pop("cookies_json", None)
-            result["cookies"] = {}
-        try:
-            result["headers"] = json.loads(result.pop("headers_json", "{}"))
-        except (json.JSONDecodeError, TypeError) as exc:
-            logger.warning("Malformed headers_json for session %s/%s: %s", hunt_id, name, exc)
-            result.pop("headers_json", None)
-            result["headers"] = {}
-        try:
-            result["tokens"] = json.loads(result.pop("tokens_json", "{}"))
-        except (json.JSONDecodeError, TypeError) as exc:
-            logger.warning("Malformed tokens_json for session %s/%s: %s", hunt_id, name, exc)
-            result.pop("tokens_json", None)
-            result["tokens"] = {}
-        try:
-            result["storage_state"] = (
-                json.loads(result["storage_state"]) if result.get("storage_state") else None
-            )
-        except (json.JSONDecodeError, TypeError) as exc:
-            logger.warning("Malformed storage_state for session %s/%s: %s", hunt_id, name, exc)
-            result["storage_state"] = None
-        result["is_valid"] = bool(result["is_valid"])
-        return result
+        return self._deserialize_session_row(dict(row), hunt_id)
 
     def get_sessions(self, hunt_id: str) -> list[dict[str, Any]]:
         """List all sessions for a hunt."""
         rows = self._conn.execute(
             "SELECT * FROM sessions WHERE hunt_id = ? ORDER BY name", (hunt_id,)
         ).fetchall()
-        results = []
-        for row in rows:
-            r = dict(row)
-            name = r.get("name", "?")
-            try:
-                r["cookies"] = json.loads(r.pop("cookies_json", "{}"))
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed cookies_json for session %s/%s: %s", hunt_id, name, exc)
-                r.pop("cookies_json", None)
-                r["cookies"] = {}
-            try:
-                r["headers"] = json.loads(r.pop("headers_json", "{}"))
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed headers_json for session %s/%s: %s", hunt_id, name, exc)
-                r.pop("headers_json", None)
-                r["headers"] = {}
-            try:
-                r["tokens"] = json.loads(r.pop("tokens_json", "{}"))
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed tokens_json for session %s/%s: %s", hunt_id, name, exc)
-                r.pop("tokens_json", None)
-                r["tokens"] = {}
-            try:
-                r["storage_state"] = (
-                    json.loads(r["storage_state"]) if r.get("storage_state") else None
-                )
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed storage_state for session %s/%s: %s", hunt_id, name, exc)
-                r["storage_state"] = None
-            r["is_valid"] = bool(r["is_valid"])
-            results.append(r)
-        return results
+        return [self._deserialize_session_row(dict(row), hunt_id) for row in rows]
+
+    def _deserialize_session_row(self, r: dict[str, Any], hunt_id: str) -> dict[str, Any]:
+        """Convert a raw sessions row into a deserialized dict."""
+        label = f"session {hunt_id}/{r.get('name', '?')}"
+        for json_col, dest_key in [
+            ("cookies_json", "cookies"),
+            ("headers_json", "headers"),
+            ("tokens_json", "tokens"),
+        ]:
+            r[dest_key] = _parse_json_field(
+                r.pop(json_col, "{}"), "{}", label=json_col, record_id=label
+            )
+        r["storage_state"] = (
+            _parse_json_field(r["storage_state"], "null", label="storage_state", record_id=label)
+            if r.get("storage_state")
+            else None
+        )
+        r["is_valid"] = bool(r["is_valid"])
+        return r
 
     def delete_session(self, hunt_id: str, name: str) -> None:
         """Delete a named session."""
@@ -1075,21 +1042,15 @@ class HuntContext:
         for row in rows:
             r = dict(row)
             fid = r.get("id", "?")
-            try:
-                r["evidence"] = json.loads(r["evidence"]) if r.get("evidence") else None
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed evidence in finding %s: %s", fid, exc)
-                r["evidence"] = None
-            try:
-                r["request_ids"] = json.loads(r["request_ids"] or "[]")
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed request_ids in finding %s: %s", fid, exc)
-                r["request_ids"] = []
-            try:
-                r["tags"] = json.loads(r["tags"] or "[]")
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed tags in finding %s: %s", fid, exc)
-                r["tags"] = []
+            r["evidence"] = (
+                _parse_json_field(r["evidence"], "null", label="evidence", record_id=fid)
+                if r.get("evidence")
+                else None
+            )
+            r["request_ids"] = _parse_json_field(
+                r["request_ids"], "[]", label="request_ids", record_id=fid
+            )
+            r["tags"] = _parse_json_field(r["tags"], "[]", label="tags", record_id=fid)
             r["confirmed"] = bool(r["confirmed"])
             r["false_positive"] = bool(r["false_positive"])
             r["reported"] = bool(r["reported"])
@@ -1144,14 +1105,11 @@ class HuntContext:
         results = []
         for row in rows:
             r = dict(row)
-            try:
-                r["interactions"] = json.loads(r["interactions"] or "[]")
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning(
-                    "Malformed interactions for OOB listener %s: %s",
-                    r.get("listener_id", "?"),
-                    exc,
-                )
-                r["interactions"] = []
+            r["interactions"] = _parse_json_field(
+                r["interactions"],
+                "[]",
+                label="interactions",
+                record_id=r.get("listener_id", "?"),
+            )
             results.append(r)
         return results
