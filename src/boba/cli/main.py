@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Generator, Optional
@@ -11,6 +12,8 @@ import typer
 
 from boba.cli.formatters import console, format_output, print_error, print_info, print_success
 from boba.core.config import get_db_path
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="boba",
@@ -37,8 +40,8 @@ def _safe_close(manager) -> None:
     """Close manager context without masking the original exception."""
     try:
         manager.close_context()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to close manager: %s", exc)
 
 
 def _safe_close_http(client) -> None:
@@ -55,8 +58,8 @@ def _safe_close_http(client) -> None:
             loop.run_until_complete(client.close())
         finally:
             loop.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to close HTTP client: %s", exc)
 
 
 @contextmanager

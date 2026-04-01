@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # Safety cap for fuzz combinations to prevent accidental OOM
 MAX_FUZZ_COMBINATIONS = 100_000
 
+# Default max response body size (50 MB) to prevent OOM from malicious targets
+DEFAULT_MAX_RESPONSE_BYTES = 50 * 1024 * 1024
+
 # Marker for fuzz injection positions
 FUZZ_MARKER = "§"
 
@@ -37,8 +40,10 @@ class HttpClient:
         verify_ssl: bool = False,
         timeout_seconds: float = 30.0,
         proxy: str | None = None,
+        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ):
         self._sink = sink
+        self._max_response_bytes = max_response_bytes
         transport_kwargs: dict[str, Any] = {}
         if proxy:
             transport_kwargs["proxy"] = proxy
@@ -130,6 +135,17 @@ class HttpClient:
         elapsed_ms = (time.monotonic() - start) * 1000
         resp_headers = dict(resp.headers)
         resp_body = resp.content
+        truncated = False
+        if len(resp_body) > self._max_response_bytes:
+            resp_body = resp_body[: self._max_response_bytes]
+            truncated = True
+            logger.warning(
+                "Response body truncated from %d to %d bytes for %s %s",
+                len(resp.content),
+                self._max_response_bytes,
+                method,
+                url,
+            )
 
         record_id = self._sink.record(
             method=method,
@@ -151,7 +167,7 @@ class HttpClient:
             status_code=resp.status_code,
             headers=resp_headers,
             body=resp_body,
-            body_text=resp.text if resp.text else "",
+            body_text=resp_body.decode("utf-8", errors="replace") if truncated else (resp.text or ""),
             elapsed_ms=elapsed_ms,
             redirect_chain=redirect_chain,
         )

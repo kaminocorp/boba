@@ -8,6 +8,16 @@ from boba.adapters.base import BaseAdapter
 from boba.core.models import AdapterConfig, OutputFormat
 
 
+def _safe_int(value: Any) -> int | None:
+    """Safely convert a value to int, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
 class NaabuAdapter(BaseAdapter):
     TOOL_NAME = "naabu"
     BINARY_NAMES = ["naabu"]
@@ -38,7 +48,7 @@ class NaabuAdapter(BaseAdapter):
         return {
             "host": raw.get("host", ""),
             "ip": raw.get("ip", ""),
-            "port": raw.get("port", 0),
+            "port": _safe_int(raw.get("port")) or 0,
             "protocol": raw.get("protocol", "tcp"),
         }
 

@@ -181,7 +181,19 @@ class BaseAdapter(ABC):
         elif self.OUTPUT_FORMAT == OutputFormat.JSON_OBJECT:
             try:
                 raw = json.loads(raw_text)
-                items = raw if isinstance(raw, list) else raw.get("results", [raw])
+                if isinstance(raw, list):
+                    items = raw
+                elif isinstance(raw, dict):
+                    items = raw.get("results", [raw])
+                else:
+                    # Primitive value (string, number, null) — not parseable as records
+                    items = []
+                    parse_errors += 1
+                    logger.warning(
+                        "%s: JSON output is a %s, expected object or array",
+                        self.TOOL_NAME,
+                        type(raw).__name__,
+                    )
                 for item in items:
                     try:
                         records.append(self.parse_record(item))

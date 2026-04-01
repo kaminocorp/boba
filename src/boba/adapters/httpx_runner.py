@@ -51,10 +51,13 @@ class HttpxRunnerAdapter(BaseAdapter):
         return cmd, None
 
     def parse_record(self, raw: dict[str, Any]) -> dict[str, Any]:
-        a_records = raw.get("a", [])
+        a_records = raw.get("a")
+        ip = a_records[0] if isinstance(a_records, list) and a_records else raw.get("host", "")
+        tls = raw.get("tls")
+        tls_version = tls.get("version", "") if isinstance(tls, dict) else ""
         return {
             "host": raw.get("input", ""),
-            "ip": a_records[0] if a_records else raw.get("host", ""),
+            "ip": ip,
             "port": _safe_int(raw.get("port")),
             "scheme": raw.get("scheme", ""),
             "url": raw.get("url", ""),
@@ -64,7 +67,7 @@ class HttpxRunnerAdapter(BaseAdapter):
             "content_length": raw.get("content_length"),
             "content_type": raw.get("content_type", ""),
             "technologies": raw.get("tech", []),
-            "tls_version": raw.get("tls", {}).get("version", ""),
+            "tls_version": tls_version,
             "final_url": raw.get("final_url", ""),
         }
 

@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.17](#0217--pre-v3-parse-robustness--data-integrity) — Adapter type guards (6 adapters), BaseAdapter JSON_OBJECT non-dict fix, finding upsert flag preservation via `MAX()`, HttpClient response body size limit (50 MB), CLI cleanup logging, 1 new test file + 27 new tests (415 total)
 - [0.2.16](#0216--pre-v3-architecture-review) — Atomic batch upserts, PRAGMA validation, scope default-deny enforcement, browser context lock, CLI `_managed` context managers (41x dedup), SQLi false-condition baseline guard, 1 new test file + 27 new tests (388 total)
 - [0.2.15](#0215--v3-readiness-final-gate) — Upsert commit safety, SSRF/IDOR/XSS detection hardening, CLI `_parse_targets()` helper, adapter urlparse safety, waybackurls concurrency fix, 1 new test file + 34 new tests (361 total)
 - [0.2.14](#0214--pre-v3-quality-gate) — JSON-aware IDOR body comparison, CLI deduplication (5 helpers extracted), missing `enum crawl` command, httpx int guard, context.py JSON refactor, XSS HTML entity detection, OOB evidence enrichment, scan config deepcopy, 3 new test files + 41 new tests (327 total)
@@ -18,6 +19,60 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.17 — Pre-V3 Parse Robustness & Data Integrity
+
+**Date:** 2026-04-01
+**Scope:** 8 files fixed, 1 new test file, 415 tests passing (27 new, 0 regressions)
+
+5-agent parallel codebase review across all layers (core, adapters, interaction, tools, CLI, tests). ~40 findings triaged down to 6 real, actionable issues — the rest were false alarms from overstated analysis (e.g., "SQL injection" in a frozenset-driven loop, "race conditions" in single-threaded asyncio). Fixes harden the boundary where untrusted external data enters the system: tool output parsing and HTTP response handling. All fixes are strictly additive. Test count: 388 → 415.
+
+### Adapter Parse Robustness (HIGH)
+
+- **Type guards in 6 adapter `parse_record()` methods** — Several adapters called `.get()` on nested JSON fields that external tools could emit as `null`, a string, or another non-dict type, causing `AttributeError` crashes:
+  - **ffuf.py** — `raw["input"]` could be `null` or string instead of `{"FUZZ": "..."}`. Now checks `isinstance(input_field, dict)` before accessing `.get("FUZZ")`.
+  - **katana.py** — `raw["request"]` and `raw["response"]` could be `null` or string. Extracted to local variables with `isinstance` guards; `.get("method")` and `.get("status_code")` now fall back cleanly.
+  - **httpx_runner.py** — `raw["a"]` (DNS A records) could be a string instead of a list. `a_records[0]` on a string yields the first *character* (e.g., `"1"` from `"192.168.1.1"`). Now checks `isinstance(a_records, list)` before indexing. Also guards `raw["tls"]` the same way.
+  - **nuclei.py** — `raw["info"]` could be `null` or string. Now checks `isinstance` before `.get("name")` / `.get("severity")`.
+  - **naabu.py** — `raw["port"]` could be a string (`"8080"`) or `null` instead of int. Now uses `_safe_int()` helper (matching httpx_runner's pattern) to coerce safely, defaulting to `0`.
+
+### BaseAdapter JSON_OBJECT Parsing (MEDIUM)
+
+- **Non-dict JSON no longer crashes `parse_output()`** — When `OUTPUT_FORMAT` is `JSON_OBJECT` and the tool outputs a bare JSON primitive (string, number, `null`), calling `.get("results", [raw])` raised `AttributeError`. Now checks `isinstance(raw, dict)` / `isinstance(raw, list)` before dispatching, logging a warning and counting a parse error for unexpected types.
+
+### Data Integrity (MEDIUM)
+
+- **Finding upsert preserves manual `confirmed`/`false_positive`/`reported` flags** — `upsert_finding()` unconditionally overwrote these boolean flags on `ON CONFLICT ... DO UPDATE`. A finding manually marked `confirmed=1` by a human triager would be downgraded to `0` by a subsequent automated re-scan. Now uses `MAX(findings.confirmed, excluded.confirmed)` — once a flag is set to `1` (by human or tool), it cannot be downgraded by a later upsert, only upgraded from `0` to `1`.
+
+### HttpClient Safety (MEDIUM)
+
+- **Response body size limit (50 MB default)** — `HttpClient.request()` read entire response bodies into memory via `resp.content` with no size cap. A malicious or misconfigured target serving multi-GB responses could cause OOM crashes. Added `max_response_bytes` parameter (default `DEFAULT_MAX_RESPONSE_BYTES = 50 * 1024 * 1024`). Bodies exceeding the limit are truncated with a warning log. `body_text` is derived from the truncated bytes when truncation occurs.
+
+### CLI Observability (LOW)
+
+- **Cleanup functions log instead of silently swallowing** — `_safe_close()` and `_safe_close_http()` caught all exceptions with bare `pass`, making database lock errors or connection failures invisible. Now log at `DEBUG` level via the module logger. This preserves the non-masking behavior (exceptions are still caught) while providing diagnostic visibility when `--verbose` / debug logging is enabled.
+
+### Test Coverage (27 new tests)
+
+- **`tests/test_fixes_0217.py`** (27 tests, new file):
+  - Adapter type guards (17 tests) — ffuf None/string/dict input (3), katana None/string/dict request+response (3), httpx_runner string/list `a` field + None/string/dict `tls` field (5), nuclei None/string/dict `info` field (3), naabu string/None/invalid port (3)
+  - BaseAdapter JSON_OBJECT parsing (3 tests) — bare string, number, and null JSON
+  - Finding flag preservation (3 tests) — confirmed not downgraded, false_positive not downgraded, upgrade from 0→1 works
+  - HttpClient response limit (2 tests) — custom and default `max_response_bytes` stored correctly
+  - CLI cleanup logging (2 tests) — `_safe_close` and `_safe_close_http` log on exception
+
+### Review Findings Triaged as False Alarms
+
+For transparency, these findings from the 5-agent review were investigated and determined to be non-issues:
+
+- **"SQL injection in `get_hunt_stats`"** — The table names come from `_STATS_TABLES`, a frozenset of string constants defined in the class. Not user-controllable.
+- **"Session cache mutation bug"** — The deepcopy→mutate→`_persist()` pattern works correctly: `_persist()` writes the mutated copy back to both DB and cache.
+- **"Browser response handler race condition"** — asyncio is cooperative single-threaded; dict increment within one coroutine step is atomic.
+- **"Transaction `_in_transaction` flag not exception-safe"** — The `with self._conn:` context manager re-raises exceptions after rollback; the caller sees the error. The `finally` block correctly resets the flag.
+- **"`asyncio.gather` exception crash in `recon.urls`"** — The `continue` on `isinstance(result, Exception)` correctly skips all subsequent attribute access including `.filtered_count`.
+- **"Source merging loses data on empty strings"** — Empty source (`""`) is correctly filtered by the SQL `WHERE value != ''` clause; no provenance to record.
 
 ---
 

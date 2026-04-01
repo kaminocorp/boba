@@ -39,7 +39,9 @@ class KatanaAdapter(BaseAdapter):
         return cmd, None
 
     def parse_record(self, raw: dict[str, Any]) -> dict[str, Any]:
-        endpoint = raw.get("endpoint", raw.get("request", {}).get("endpoint", ""))
+        req = raw.get("request") if isinstance(raw.get("request"), dict) else {}
+        resp = raw.get("response") if isinstance(raw.get("response"), dict) else {}
+        endpoint = raw.get("endpoint", req.get("endpoint", ""))
         try:
             parsed = urlparse(endpoint)
             host = parsed.hostname or ""
@@ -53,8 +55,8 @@ class KatanaAdapter(BaseAdapter):
             "path": path,
             "query": query,
             "found_on": raw.get("source", ""),
-            "method": raw.get("request", {}).get("method", "GET"),
-            "status_code": raw.get("response", {}).get("status_code"),
+            "method": req.get("method", "GET"),
+            "status_code": resp.get("status_code"),
             "source": "katana",
         }
 

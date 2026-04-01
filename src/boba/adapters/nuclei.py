@@ -64,7 +64,7 @@ class NucleiAdapter(BaseAdapter):
     def parse_record(self, raw: dict[str, Any] | str) -> dict[str, Any]:
         if isinstance(raw, str):
             return {"url": raw}
-        info = raw.get("info", {})
+        info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
         return {
             "template_id": raw.get("template-id", ""),
             "template_name": info.get("name", ""),

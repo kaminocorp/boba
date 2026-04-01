@@ -84,9 +84,11 @@ class FfufAdapter(BaseAdapter):
         return cmd, output_file
 
     def parse_record(self, raw: dict[str, Any]) -> dict[str, Any]:
+        input_field = raw.get("input")
+        input_value = input_field.get("FUZZ", "") if isinstance(input_field, dict) else ""
         return {
             "url": raw.get("url", ""),
-            "input_value": raw.get("input", {}).get("FUZZ", ""),
+            "input_value": input_value,
             "status_code": raw.get("status", 0),
             "content_length": raw.get("length", 0),
             "word_count": raw.get("words", 0),
