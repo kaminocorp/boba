@@ -94,14 +94,17 @@ class OOBManager:
             "test_payload": test_payload,
         }
 
-        self._context.insert_oob_listener(self._hunt_id, {
-            "listener_id": listener_id,
-            "callback_domain": callback_domain,
-            "purpose": purpose,
-            "target_url": target_url,
-            "parameter": parameter,
-            "test_payload": test_payload,
-        })
+        self._context.insert_oob_listener(
+            self._hunt_id,
+            {
+                "listener_id": listener_id,
+                "callback_domain": callback_domain,
+                "purpose": purpose,
+                "target_url": target_url,
+                "parameter": parameter,
+                "test_payload": test_payload,
+            },
+        )
 
         return callback_domain
 
@@ -140,8 +143,9 @@ class OOBManager:
                         }
                         # Match to listener — use startswith since Interactsh
                         # prefixes the full interaction ID with the listener ID
+                        full_id = entry.get("full_id", "")
                         for lid, info in self._listeners.items():
-                            if entry.get("full_id", "").startswith(lid):
+                            if lid and full_id.startswith(lid):
                                 entry["listener_id"] = lid
                                 entry["purpose"] = info["purpose"]
                                 entry["target_url"] = info["target_url"]
@@ -162,17 +166,18 @@ class OOBManager:
         # Persist interactions — fetch listeners once, index by ID
         if all_interactions:
             existing_listeners = {
-                rec["listener_id"]: rec
-                for rec in self._context.get_oob_listeners(self._hunt_id)
+                rec["listener_id"]: rec for rec in self._context.get_oob_listeners(self._hunt_id)
             }
             for interaction in all_interactions:
                 lid = interaction.get("listener_id")
                 if lid and lid in existing_listeners:
                     prev = existing_listeners[lid].get("interactions", [])
-                    prev.append(interaction)
-                    self._context.update_oob_interactions(
-                        self._hunt_id, lid, prev
-                    )
+                    # Deduplicate by full_id to avoid appending the same
+                    # interaction across multiple poll() calls.
+                    seen_ids = {p.get("full_id") for p in prev if p.get("full_id")}
+                    if interaction.get("full_id") not in seen_ids:
+                        prev.append(interaction)
+                    self._context.update_oob_interactions(self._hunt_id, lid, prev)
 
         return all_interactions
 

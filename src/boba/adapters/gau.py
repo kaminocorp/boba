@@ -19,9 +19,7 @@ class GauAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "go install -v github.com/lc/gau/v2/cmd/gau@latest"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], None]:
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         cmd = [str(self._binary_path)]
         cmd.extend(targets)
         cmd.extend(config.extra_args)

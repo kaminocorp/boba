@@ -208,16 +208,19 @@ class SessionManager:
         return state
 
     def _persist(self, state: SessionState) -> None:
-        self._context.upsert_session(self._hunt_id, {
-            "name": state.name,
-            "target_url": state.target_url,
-            "auth_method": state.auth_method.value,
-            "cookies": state.cookies,
-            "headers": state.headers,
-            "tokens": state.tokens,
-            "storage_state": state.storage_state,
-            "is_valid": state.is_valid,
-        })
+        self._context.upsert_session(
+            self._hunt_id,
+            {
+                "name": state.name,
+                "target_url": state.target_url,
+                "auth_method": state.auth_method.value,
+                "cookies": state.cookies,
+                "headers": state.headers,
+                "tokens": state.tokens,
+                "storage_state": state.storage_state,
+                "is_valid": state.is_valid,
+            },
+        )
         self._cache[state.name] = state
 
     def _load(self, session_name: str) -> SessionState | None:

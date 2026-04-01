@@ -28,8 +28,13 @@ async def nuclei_scan(
 
     if not targets:
         return ToolResult(
-            tool_name="nuclei", command=[], exit_code=0,
-            raw_stdout="", raw_stderr="", duration_seconds=0.0, records=[],
+            tool_name="nuclei",
+            command=[],
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            duration_seconds=0.0,
+            records=[],
         )
 
     config = config or AdapterConfig()
@@ -46,15 +51,18 @@ async def nuclei_scan(
 
     # Persist findings
     for record in result.records:
-        context.upsert_finding(hunt.id, {
-            "finding_type": record.get("finding_type", "nuclei"),
-            "severity": record.get("severity", "info"),
-            "title": f"[{record.get('template_id', '')}] {record.get('template_name', '')}",
-            "description": record.get("description", ""),
-            "url": record.get("url", ""),
-            "template_id": record.get("template_id"),
-            "tags": record.get("tags", []),
-        })
+        context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": record.get("finding_type", "nuclei"),
+                "severity": record.get("severity", "info"),
+                "title": f"[{record.get('template_id', '')}] {record.get('template_name', '')}",
+                "description": record.get("description", ""),
+                "url": record.get("url", ""),
+                "template_id": record.get("template_id"),
+                "tags": record.get("tags", []),
+            },
+        )
 
     context.log_tool_run(hunt.id, result)
     return result

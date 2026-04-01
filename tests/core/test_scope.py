@@ -60,7 +60,9 @@ class TestURLPrefixMatching:
         config = ScopeConfig(
             rules=[
                 ScopeRule("*.example.com", ScopeRuleType.DOMAIN, ScopeAction.INCLUDE),
-                ScopeRule("https://app.example.com/*", ScopeRuleType.URL_PREFIX, ScopeAction.INCLUDE),
+                ScopeRule(
+                    "https://app.example.com/*", ScopeRuleType.URL_PREFIX, ScopeAction.INCLUDE
+                ),
             ]
         )
         engine = ScopeEngine(config)
@@ -70,7 +72,9 @@ class TestURLPrefixMatching:
         config = ScopeConfig(
             rules=[
                 ScopeRule("*.example.com", ScopeRuleType.DOMAIN, ScopeAction.INCLUDE),
-                ScopeRule("https://app.example.com/admin", ScopeRuleType.URL_PREFIX, ScopeAction.EXCLUDE),
+                ScopeRule(
+                    "https://app.example.com/admin", ScopeRuleType.URL_PREFIX, ScopeAction.EXCLUDE
+                ),
             ]
         )
         engine = ScopeEngine(config)

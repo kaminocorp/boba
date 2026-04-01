@@ -110,14 +110,15 @@ class TestReplay:
             source="http_client",
         )
 
-        mock_resp = _mock_response(
-            status_code=200, content=b'{"id": 123}', text='{"id": 123}'
-        )
+        mock_resp = _mock_response(status_code=200, content=b'{"id": 123}', text='{"id": 123}')
         client._client.request = AsyncMock(return_value=mock_resp)
 
-        resp = await client.replay(rid, modifications={
-            "headers": {"Authorization": "Bearer tok_b"},
-        })
+        resp = await client.replay(
+            rid,
+            modifications={
+                "headers": {"Authorization": "Bearer tok_b"},
+            },
+        )
         assert resp.status_code == 200
 
         # Should be linked to parent
@@ -135,16 +136,24 @@ class TestCompare:
     @pytest.mark.asyncio
     async def test_identical_responses(self, client, sink):
         rid_a = sink.record(
-            method="GET", url="https://x.com/api",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={"content-type": "text/plain"},
-            response_body=b"same", elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/api",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={"content-type": "text/plain"},
+            response_body=b"same",
+            elapsed_ms=10.0,
         )
         rid_b = sink.record(
-            method="GET", url="https://x.com/api",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={"content-type": "text/plain"},
-            response_body=b"same", elapsed_ms=12.0,
+            method="GET",
+            url="https://x.com/api",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={"content-type": "text/plain"},
+            response_body=b"same",
+            elapsed_ms=12.0,
         )
         result = await client.compare(rid_a, rid_b)
         assert result.status_match is True
@@ -153,16 +162,24 @@ class TestCompare:
     @pytest.mark.asyncio
     async def test_different_responses(self, client, sink):
         rid_a = sink.record(
-            method="GET", url="https://x.com/api",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={"content-type": "text/plain"},
-            response_body=b"user A data", elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/api",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={"content-type": "text/plain"},
+            response_body=b"user A data",
+            elapsed_ms=10.0,
         )
         rid_b = sink.record(
-            method="GET", url="https://x.com/api",
-            request_headers={}, request_body=None,
-            status_code=403, response_headers={"content-type": "text/plain"},
-            response_body=b"forbidden", elapsed_ms=5.0,
+            method="GET",
+            url="https://x.com/api",
+            request_headers={},
+            request_body=None,
+            status_code=403,
+            response_headers={"content-type": "text/plain"},
+            response_body=b"forbidden",
+            elapsed_ms=5.0,
         )
         result = await client.compare(rid_a, rid_b)
         assert result.status_match is False

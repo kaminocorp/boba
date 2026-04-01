@@ -26,9 +26,11 @@ def jwt_encode_unsigned(header: dict, payload: dict) -> str:
     header = {**header, "alg": "none"}
 
     def _encode(d: dict) -> str:
-        return base64.urlsafe_b64encode(
-            json.dumps(d, separators=(",", ":")).encode()
-        ).rstrip(b"=").decode()
+        return (
+            base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode())
+            .rstrip(b"=")
+            .decode()
+        )
 
     return f"{_encode(header)}.{_encode(payload)}."
 

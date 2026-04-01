@@ -169,9 +169,7 @@ class BrowserManager:
                 session_name=context_name if context_name != "default" else None,
                 resource_type=response.request.resource_type,
             )
-            self._request_counts[context_name] = (
-                self._request_counts.get(context_name, 0) + 1
-            )
+            self._request_counts[context_name] = self._request_counts.get(context_name, 0) + 1
 
         page.on("response", _on_response)
 
@@ -343,9 +341,7 @@ class BrowserManager:
             return []
         return await self._contexts[context_name].cookies()
 
-    async def set_cookies(
-        self, cookies: list[dict], context_name: str = "default"
-    ) -> None:
+    async def set_cookies(self, cookies: list[dict], context_name: str = "default") -> None:
         """Set cookies on a context."""
         ctx = await self.get_or_create_context(context_name)
         await ctx.add_cookies(cookies)
@@ -359,8 +355,7 @@ class BrowserManager:
     async def apply_session(self, session: SessionState) -> None:
         """Apply a SessionState to a browser context named after the session."""
         cookies_list = [
-            {"name": k, "value": v, "url": session.target_url}
-            for k, v in session.cookies.items()
+            {"name": k, "value": v, "url": session.target_url} for k, v in session.cookies.items()
         ]
         ctx_kwargs: dict[str, Any] = {}
         if session.storage_state:

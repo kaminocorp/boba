@@ -83,29 +83,41 @@ class TestRecord:
     def test_redirect_detection(self, sink):
         for code in [301, 302, 303, 307, 308]:
             rid = sink.record(
-                method="GET", url=f"https://x.com/{code}",
-                request_headers={}, request_body=None,
+                method="GET",
+                url=f"https://x.com/{code}",
+                request_headers={},
+                request_body=None,
                 status_code=code,
                 response_headers={"location": "/dest"},
-                response_body=None, elapsed_ms=10.0,
+                response_body=None,
+                elapsed_ms=10.0,
             )
             record = sink.get(rid)
             assert record["is_redirect"] == 1, f"Expected redirect for {code}"
 
     def test_parent_request_id(self, sink):
         parent = sink.record(
-            method="GET", url="https://x.com/original",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/original",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
             source="http_client",
         )
         child = sink.record(
-            method="GET", url="https://x.com/original",
-            request_headers={"X-Modified": "true"}, request_body=None,
-            status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=15.0,
-            source="replay", parent_request_id=parent,
+            method="GET",
+            url="https://x.com/original",
+            request_headers={"X-Modified": "true"},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=15.0,
+            source="replay",
+            parent_request_id=parent,
         )
         record = sink.get(child)
         assert record["parent_request_id"] == parent
@@ -115,10 +127,14 @@ class TestLargeBodyStorage:
     def test_small_body_stored_inline(self, sink):
         body = b"small body"
         rid = sink.record(
-            method="GET", url="https://x.com/small",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={},
-            response_body=body, elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/small",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=body,
+            elapsed_ms=10.0,
         )
         record = sink.get(rid)
         assert record["response_body"] == "small body"
@@ -127,10 +143,14 @@ class TestLargeBodyStorage:
     def test_large_body_stored_as_file(self, sink):
         body = b"x" * (BODY_INLINE_LIMIT + 1000)
         rid = sink.record(
-            method="GET", url="https://x.com/large",
-            request_headers={}, request_body=None,
-            status_code=200, response_headers={},
-            response_body=body, elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/large",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=body,
+            elapsed_ms=10.0,
         )
         record = sink.get(rid)
         # Inline should be a truncated preview
@@ -144,10 +164,14 @@ class TestLargeBodyStorage:
     def test_large_request_body_stored_as_file(self, sink):
         body = b"y" * (BODY_INLINE_LIMIT + 500)
         rid = sink.record(
-            method="POST", url="https://x.com/upload",
-            request_headers={}, request_body=body,
-            status_code=201, response_headers={},
-            response_body=b"ok", elapsed_ms=20.0,
+            method="POST",
+            url="https://x.com/upload",
+            request_headers={},
+            request_body=body,
+            status_code=201,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=20.0,
         )
         record = sink.get(rid)
         assert record["request_body_ref"] is not None
@@ -159,14 +183,24 @@ class TestLargeBodyStorage:
 class TestQuery:
     def test_query_by_host(self, sink):
         sink.record(
-            method="GET", url="https://a.com/", request_headers={},
-            request_body=None, status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0,
+            method="GET",
+            url="https://a.com/",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
         )
         sink.record(
-            method="GET", url="https://b.com/", request_headers={},
-            request_body=None, status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0,
+            method="GET",
+            url="https://b.com/",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
         )
         results = sink.query(host="a.com")
         assert len(results) == 1
@@ -174,14 +208,26 @@ class TestQuery:
 
     def test_query_by_source(self, sink):
         sink.record(
-            method="GET", url="https://x.com/1", request_headers={},
-            request_body=None, status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0, source="browser",
+            method="GET",
+            url="https://x.com/1",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
+            source="browser",
         )
         sink.record(
-            method="GET", url="https://x.com/2", request_headers={},
-            request_body=None, status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0, source="http_client",
+            method="GET",
+            url="https://x.com/2",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
+            source="http_client",
         )
         results = sink.query(source="browser")
         assert len(results) == 1
@@ -190,9 +236,14 @@ class TestQuery:
 class TestAnnotation:
     def test_tag_and_annotate(self, sink):
         rid = sink.record(
-            method="GET", url="https://x.com/", request_headers={},
-            request_body=None, status_code=200, response_headers={},
-            response_body=b"ok", elapsed_ms=10.0,
+            method="GET",
+            url="https://x.com/",
+            request_headers={},
+            request_body=None,
+            status_code=200,
+            response_headers={},
+            response_body=b"ok",
+            elapsed_ms=10.0,
         )
         sink.tag(rid, ["interesting", "idor"])
         sink.annotate(rid, "Check this endpoint with other user")

@@ -18,13 +18,12 @@ class NaabuAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], None]:
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         input_file = self._create_temp_file(targets)
         cmd = [
             str(self._binary_path),
-            "-l", str(input_file),
+            "-l",
+            str(input_file),
             "-json",
             "-silent",
         ]

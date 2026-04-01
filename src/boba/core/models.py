@@ -152,9 +152,7 @@ class BrowserConfig:
     headless: bool = True
     proxy: str | None = None
     user_agent: str | None = None
-    viewport: dict[str, int] = field(
-        default_factory=lambda: {"width": 1280, "height": 720}
-    )
+    viewport: dict[str, int] = field(default_factory=lambda: {"width": 1280, "height": 720})
     ignore_https_errors: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
     slow_mo: int = 0

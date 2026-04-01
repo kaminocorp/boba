@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.11](#0211--pre-v3-quality-gate--test-coverage) — 5 bug fixes (scope YAML null, OOB listener guard, OOB dedup, subprocess timeout, SQLi case sensitivity), 90 new tests covering hunt manager, subprocess, all adapters, recon/enum tools, CLI
 - [0.2.10](#0210--v3-readiness-final-quality-pass) — Findings upsert stale flags, hunt state validation, tool_run started_at, MSSQL payload, OOB poll drift, navigate/login timeout, YAML scope errors, IDOR body comparison, CLI event loop, 10 fixes total
 - [0.2.9](#029--v3-readiness-final-gate) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
 - [0.2.8](#028--v3-readiness-gate) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
@@ -12,6 +13,33 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.11 — Pre-V3 Quality Gate & Test Coverage
+
+**Date:** 2026-04-01
+**Scope:** 5 files fixed, 8 new test files, 206 tests passing (90 new, 0 regressions)
+
+Comprehensive 4-agent parallel codebase review followed by bug fixes and major test coverage expansion. Test count: 116 → 206.
+
+### Bug Fixes
+
+- **`from_yaml()` crashes on empty YAML** — `yaml.safe_load()` returns `None` for empty files; now validates result is a dict before calling `.get()`
+- **OOB empty `listener_id` matches everything** — added `lid` truthiness guard so `startswith("")` can't match all interactions
+- **OOB interaction deduplication** — `poll()` now deduplicates by `full_id` before appending, preventing duplicate interactions across multiple poll calls
+- **Streaming subprocess `wait()` can hang forever** — added 5s timeout to `process.wait()` after kill in `run_subprocess_streaming()` finally block
+- **SQLi error signatures case-sensitive** — lowercased all signatures; detection already uses `.lower()` on both sides, now consistent
+
+### Test Coverage (90 new tests)
+
+- **`tests/core/test_hunt.py`** (14 tests) — HuntManager CRUD, scope persistence, YAML loading, state transitions, terminal state enforcement, stats
+- **`tests/core/test_subprocess.py`** (10 tests) — echo, exit codes, stderr, timeout, stdin, env vars, callbacks, streaming, duration tracking
+- **`tests/adapters/test_base_adapter.py`** (20 tests) — parse_output for all 4 formats (JSONL, JSON_OBJECT, PLAIN_LINES, JSON_ARRAY), error counting, file-based output, temp file lifecycle
+- **`tests/adapters/test_adapters.py`** (24 tests) — build_command and parse_record for all 8 adapters + Nuclei
+- **`tests/tools/test_recon.py`** (7 tests) — subdomains, hosts, ports, urls (parallel merge), tech, tool run logging
+- **`tests/tools/test_enum.py`** (6 tests) — directories, crawl, empty targets, tool run logging
+- **`tests/cli/test_cli.py`** (9 tests) — hunt create/list/status/pause/close, JSON format, invalid format error, context stats
 
 ---
 

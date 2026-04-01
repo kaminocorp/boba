@@ -46,9 +46,7 @@ class ScopeEngine:
                 try:
                     compiled = self._domain_to_regex(rule.pattern)
                 except re.error as e:
-                    raise ValueError(
-                        f"Invalid domain scope pattern '{rule.pattern}': {e}"
-                    ) from e
+                    raise ValueError(f"Invalid domain scope pattern '{rule.pattern}': {e}") from e
                 if rule.action == ScopeAction.INCLUDE:
                     self._domain_includes.append(compiled)
                 else:
@@ -58,9 +56,7 @@ class ScopeEngine:
                 try:
                     network = ipaddress.ip_network(rule.pattern, strict=False)
                 except ValueError as e:
-                    raise ValueError(
-                        f"Invalid IP range scope pattern '{rule.pattern}': {e}"
-                    ) from e
+                    raise ValueError(f"Invalid IP range scope pattern '{rule.pattern}': {e}") from e
                 if rule.action == ScopeAction.INCLUDE:
                     self._ip_includes.append(network)
                 else:
@@ -231,6 +227,11 @@ class ScopeEngine:
         path = Path(path)
         with open(path) as f:
             data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Invalid scope YAML in {path}: expected a mapping, got {type(data).__name__}"
+            )
 
         rules = []
         for i, r in enumerate(data.get("rules", [])):

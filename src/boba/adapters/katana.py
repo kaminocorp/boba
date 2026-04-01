@@ -19,18 +19,19 @@ class KatanaAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], None]:
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         input_file = self._create_temp_file(targets)
         cmd = [
             str(self._binary_path),
-            "-list", str(input_file),
+            "-list",
+            str(input_file),
             "-json",
             "-silent",
             "-js-crawl",
-            "-known-files", "all",
-            "-depth", str(config.extra_args_dict.get("depth", "3")),
+            "-known-files",
+            "all",
+            "-depth",
+            str(config.extra_args_dict.get("depth", "3")),
         ]
         if config.rate_limit:
             cmd.extend(["-rl", str(config.rate_limit)])

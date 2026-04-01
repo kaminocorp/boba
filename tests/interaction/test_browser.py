@@ -38,25 +38,33 @@ def _mock_page():
     page.title = AsyncMock(return_value="Example Domain")
     page.goto = AsyncMock()
     page.screenshot = AsyncMock()
-    page.evaluate = AsyncMock(return_value={
-        "forms": [{"action": "/login", "method": "post", "inputs": [
-            {"name": "username", "type": "text", "value": "", "id": "user"},
-        ]}],
-        "links": [{"href": "https://example.com/about", "text": "About"}],
-        "scripts": [{"src": "https://example.com/app.js"}],
-        "meta": {"description": "Example site"},
-        "comments": ["TODO: remove debug endpoint"],
-        "inputs": [{"name": "username", "type": "text", "value": "", "id": "user"}],
-        "textContent": "Welcome to Example",
-    })
+    page.evaluate = AsyncMock(
+        return_value={
+            "forms": [
+                {
+                    "action": "/login",
+                    "method": "post",
+                    "inputs": [
+                        {"name": "username", "type": "text", "value": "", "id": "user"},
+                    ],
+                }
+            ],
+            "links": [{"href": "https://example.com/about", "text": "About"}],
+            "scripts": [{"src": "https://example.com/app.js"}],
+            "meta": {"description": "Example site"},
+            "comments": ["TODO: remove debug endpoint"],
+            "inputs": [{"name": "username", "type": "text", "value": "", "id": "user"}],
+            "textContent": "Welcome to Example",
+        }
+    )
     page.fill = AsyncMock()
     page.click = AsyncMock()
     page.wait_for_load_state = AsyncMock()
     page.on = MagicMock()
     page.context = AsyncMock()
-    page.context.cookies = AsyncMock(return_value=[
-        {"name": "session", "value": "abc123", "domain": "example.com", "path": "/"}
-    ])
+    page.context.cookies = AsyncMock(
+        return_value=[{"name": "session", "value": "abc123", "domain": "example.com", "path": "/"}]
+    )
     return page
 
 
@@ -84,9 +92,14 @@ class TestBrowserLifecycle:
         mock_pw_cm = AsyncMock()
         mock_pw_cm.start = AsyncMock(return_value=pw_instance)
 
-        with patch.dict("sys.modules", {"playwright.async_api": MagicMock(
-            async_playwright=MagicMock(return_value=mock_pw_cm)
-        )}):
+        with patch.dict(
+            "sys.modules",
+            {
+                "playwright.async_api": MagicMock(
+                    async_playwright=MagicMock(return_value=mock_pw_cm)
+                )
+            },
+        ):
             await mgr.start()
             assert mgr._browser is not None
 

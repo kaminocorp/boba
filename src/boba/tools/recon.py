@@ -173,7 +173,7 @@ async def tech(
     flat_techs = []
     for record in result.records:
         host = record.get("host", "")
-        for t in (record.get("technologies") or []):
+        for t in record.get("technologies") or []:
             flat_techs.append({**t, "host": host})
     if flat_techs:
         context.upsert_records(hunt.id, "technology", flat_techs, source="whatweb")

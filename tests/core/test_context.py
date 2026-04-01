@@ -51,23 +51,43 @@ class TestSubdomainUpsert:
 
 class TestHostUpsert:
     def test_insert_and_query(self, context, sample_hunt):
-        context.upsert_host(sample_hunt.id, {
-            "host": "api.example.com", "ip": "1.2.3.4", "port": 443, "scheme": "https",
-            "url": "https://api.example.com", "status_code": 200, "title": "API",
-        })
+        context.upsert_host(
+            sample_hunt.id,
+            {
+                "host": "api.example.com",
+                "ip": "1.2.3.4",
+                "port": 443,
+                "scheme": "https",
+                "url": "https://api.example.com",
+                "status_code": 200,
+                "title": "API",
+            },
+        )
         hosts = context.get_hosts(sample_hunt.id, alive_only=True)
         assert len(hosts) == 1
         assert hosts[0]["title"] == "API"
 
     def test_updates_on_rescan(self, context, sample_hunt):
-        context.upsert_host(sample_hunt.id, {
-            "host": "api.example.com", "port": 443, "scheme": "https",
-            "status_code": 200, "title": "Old Title",
-        })
-        context.upsert_host(sample_hunt.id, {
-            "host": "api.example.com", "port": 443, "scheme": "https",
-            "status_code": 200, "title": "New Title",
-        })
+        context.upsert_host(
+            sample_hunt.id,
+            {
+                "host": "api.example.com",
+                "port": 443,
+                "scheme": "https",
+                "status_code": 200,
+                "title": "Old Title",
+            },
+        )
+        context.upsert_host(
+            sample_hunt.id,
+            {
+                "host": "api.example.com",
+                "port": 443,
+                "scheme": "https",
+                "status_code": 200,
+                "title": "New Title",
+            },
+        )
         hosts = context.get_hosts(sample_hunt.id)
         assert len(hosts) == 1
         assert hosts[0]["title"] == "New Title"
@@ -75,12 +95,22 @@ class TestHostUpsert:
 
 class TestURLUpsert:
     def test_source_merging(self, context, sample_hunt):
-        context.upsert_url(sample_hunt.id, {
-            "url": "https://example.com/api", "host": "example.com", "source": "gau",
-        })
-        context.upsert_url(sample_hunt.id, {
-            "url": "https://example.com/api", "host": "example.com", "source": "waybackurls",
-        })
+        context.upsert_url(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/api",
+                "host": "example.com",
+                "source": "gau",
+            },
+        )
+        context.upsert_url(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/api",
+                "host": "example.com",
+                "source": "waybackurls",
+            },
+        )
         urls = context.get_urls(sample_hunt.id)
         assert len(urls) == 1
         sources = json.loads(urls[0]["sources"])
@@ -90,9 +120,13 @@ class TestURLUpsert:
 class TestToolRunLogging:
     def test_log_and_query(self, context, sample_hunt):
         result = ToolResult(
-            tool_name="subfinder", command=["subfinder", "-d", "example.com"],
-            exit_code=0, raw_stdout="", raw_stderr="",
-            duration_seconds=2.5, records=[{"subdomain": "api.example.com"}],
+            tool_name="subfinder",
+            command=["subfinder", "-d", "example.com"],
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            duration_seconds=2.5,
+            records=[{"subdomain": "api.example.com"}],
         )
         context.log_tool_run(sample_hunt.id, result)
         runs = context.get_tool_runs(sample_hunt.id)

@@ -19,9 +19,7 @@ app = typer.Typer(
 
 # ═══════════════════ Global options ═══════════════════
 
-FormatOption = Annotated[
-    str, typer.Option("--format", "-f", help="Output format: json or table")
-]
+FormatOption = Annotated[str, typer.Option("--format", "-f", help="Output format: json or table")]
 DataDirOption = Annotated[
     Optional[Path], typer.Option("--data-dir", help="Data directory (default: ~/.boba)")
 ]
@@ -209,8 +207,12 @@ def recon_subdomains(
         result = asyncio.run(recon.subdomains(manager.context, hunt, domain))
         if fmt == "json":
             format_output(
-                {"tool": "subfinder", "found": len(result.records),
-                 "filtered": result.filtered_count, "records": result.records},
+                {
+                    "tool": "subfinder",
+                    "found": len(result.records),
+                    "filtered": result.filtered_count,
+                    "records": result.records,
+                },
                 fmt="json",
             )
         else:
@@ -229,7 +231,9 @@ def recon_subdomains(
 @recon_app.command("hosts")
 def recon_hosts(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    targets: Annotated[Optional[str], typer.Option("--targets", "-t", help="Comma-separated hosts")] = None,
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated hosts")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -248,7 +252,8 @@ def recon_hosts(
             )
         else:
             format_output(
-                result.records, fmt="table",
+                result.records,
+                fmt="table",
                 columns=["host", "status_code", "title", "webserver", "technologies"],
                 title="Live Hosts",
             )
@@ -262,8 +267,12 @@ def recon_hosts(
 @recon_app.command("ports")
 def recon_ports(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    targets: Annotated[Optional[str], typer.Option("--targets", "-t", help="Comma-separated hosts")] = None,
-    range_: Annotated[Optional[str], typer.Option("--range", "-r", help="Port range (e.g., 1-1000)")] = None,
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated hosts")
+    ] = None,
+    range_: Annotated[
+        Optional[str], typer.Option("--range", "-r", help="Port range (e.g., 1-1000)")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -305,13 +314,18 @@ def recon_urls(
         result = asyncio.run(recon.urls(manager.context, hunt, domain))
         if fmt == "json":
             format_output(
-                {"tool": "recon.urls", "found": len(result.records),
-                 "filtered": result.filtered_count, "records": result.records},
+                {
+                    "tool": "recon.urls",
+                    "found": len(result.records),
+                    "filtered": result.filtered_count,
+                    "records": result.records,
+                },
                 fmt="json",
             )
         else:
             format_output(
-                result.records, fmt="table",
+                result.records,
+                fmt="table",
                 columns=["url", "host", "path", "source"],
                 title="Discovered URLs",
             )
@@ -325,7 +339,9 @@ def recon_urls(
 @recon_app.command("tech")
 def recon_tech(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    targets: Annotated[Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")] = None,
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -347,11 +363,13 @@ def recon_tech(
             rows = []
             for record in result.records:
                 for t in record.get("technologies", []):
-                    rows.append({
-                        "host": record.get("host", ""),
-                        "technology": t.get("name", ""),
-                        "version": t.get("version", ""),
-                    })
+                    rows.append(
+                        {
+                            "host": record.get("host", ""),
+                            "technology": t.get("name", ""),
+                            "version": t.get("version", ""),
+                        }
+                    )
             format_output(rows, fmt="table", title="Technologies")
     except Exception as e:
         print_error(str(e))
@@ -370,9 +388,15 @@ app.add_typer(enum_app, name="enum")
 def enum_directories(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     url: Annotated[str, typer.Option("--url", "-u", help="Target URL (FUZZ keyword optional)")],
-    wordlist: Annotated[Optional[str], typer.Option("--wordlist", "-w", help="Wordlist path")] = None,
-    match_codes: Annotated[str, typer.Option("--match-codes", "-mc", help="Status codes to match")] = "200,301,302,403",
-    extensions: Annotated[Optional[str], typer.Option("--extensions", "-e", help="File extensions (comma-separated)")] = None,
+    wordlist: Annotated[
+        Optional[str], typer.Option("--wordlist", "-w", help="Wordlist path")
+    ] = None,
+    match_codes: Annotated[
+        str, typer.Option("--match-codes", "-mc", help="Status codes to match")
+    ] = "200,301,302,403",
+    extensions: Annotated[
+        Optional[str], typer.Option("--extensions", "-e", help="File extensions (comma-separated)")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -393,7 +417,8 @@ def enum_directories(
             )
         else:
             format_output(
-                result.records, fmt="table",
+                result.records,
+                fmt="table",
                 columns=["url", "status_code", "content_length", "content_type"],
                 title="Directories",
             )
@@ -437,7 +462,8 @@ def ctx_hosts(
     try:
         records = manager.context.get_hosts(hunt_id, alive_only=alive_only)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["host", "ip", "port", "scheme", "status_code", "title", "webserver"],
             title="Hosts",
         )
@@ -498,7 +524,9 @@ def ctx_tech(
 @context_app.command("directories")
 def ctx_directories(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    url_prefix: Annotated[Optional[str], typer.Option("--url-prefix", help="Filter by URL prefix")] = None,
+    url_prefix: Annotated[
+        Optional[str], typer.Option("--url-prefix", help="Filter by URL prefix")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -507,7 +535,8 @@ def ctx_directories(
     try:
         records = manager.context.get_directories(hunt_id, url_prefix=url_prefix)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["url", "status_code", "content_length", "content_type"],
             title="Directories",
         )
@@ -526,8 +555,16 @@ def ctx_runs(
     try:
         records = manager.context.get_tool_runs(hunt_id)
         format_output(
-            records, fmt=fmt,
-            columns=["tool_name", "status", "duration_seconds", "records_found", "records_filtered", "started_at"],
+            records,
+            fmt=fmt,
+            columns=[
+                "tool_name",
+                "status",
+                "duration_seconds",
+                "records_found",
+                "records_filtered",
+                "started_at",
+            ],
             title="Tool Runs",
         )
     finally:
@@ -559,7 +596,9 @@ app.add_typer(browser_app, name="browser")
 def browser_navigate(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     url: Annotated[str, typer.Option("--url", "-u", help="URL to navigate to")],
-    context_name: Annotated[str, typer.Option("--context", "-c", help="Browser context name")] = "default",
+    context_name: Annotated[
+        str, typer.Option("--context", "-c", help="Browser context name")
+    ] = "default",
     wait_until: Annotated[str, typer.Option("--wait-until", help="Wait condition")] = "networkidle",
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
@@ -586,9 +625,12 @@ def browser_navigate(
 
         info = asyncio.run(_run())
         data = {
-            "url": info.url, "final_url": info.final_url,
-            "status_code": info.status_code, "title": info.title,
-            "content_type": info.content_type, "timing_ms": info.timing_ms,
+            "url": info.url,
+            "final_url": info.final_url,
+            "status_code": info.status_code,
+            "title": info.title,
+            "content_type": info.content_type,
+            "timing_ms": info.timing_ms,
             "requests_captured": info.requests_captured,
         }
         format_output(data, fmt=fmt, title="Navigation Result")
@@ -684,7 +726,9 @@ def http_request(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
     method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "GET",
-    header: Annotated[Optional[list[str]], typer.Option("--header", "-H", help="Header (KEY:VALUE)")] = None,
+    header: Annotated[
+        Optional[list[str]], typer.Option("--header", "-H", help="Header (KEY:VALUE)")
+    ] = None,
     body: Annotated[Optional[str], typer.Option("--body", "-b", help="Request body")] = None,
     fmt: FormatOption = "json",
     data_dir: DataDirOption = None,
@@ -709,9 +753,14 @@ def http_request(
                 k, v = h.split(":", 1)
                 headers[k.strip()] = v.strip()
 
-        resp = asyncio.run(client.request(
-            method=method, url=url, headers=headers or None, body=body,
-        ))
+        resp = asyncio.run(
+            client.request(
+                method=method,
+                url=url,
+                headers=headers or None,
+                body=body,
+            )
+        )
         data = {
             "request_id": resp.request_id,
             "status_code": resp.status_code,
@@ -732,8 +781,12 @@ def http_request(
 def http_replay(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     request_id: Annotated[int, typer.Option("--request-id", help="ID from http_history")],
-    modify_header: Annotated[Optional[list[str]], typer.Option("--modify-header", help="Override header (KEY:VALUE)")] = None,
-    modify_body: Annotated[Optional[str], typer.Option("--modify-body", help="Override body")] = None,
+    modify_header: Annotated[
+        Optional[list[str]], typer.Option("--modify-header", help="Override header (KEY:VALUE)")
+    ] = None,
+    modify_body: Annotated[
+        Optional[str], typer.Option("--modify-body", help="Override body")
+    ] = None,
     fmt: FormatOption = "json",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -839,8 +892,14 @@ def session_create(
         mgr = SessionManager(manager.context, hunt_id)
         state = mgr.create(name, target, auth_method)
         if fmt == "json":
-            format_output({"name": state.name, "target_url": state.target_url,
-                           "auth_method": state.auth_method.value}, fmt="json")
+            format_output(
+                {
+                    "name": state.name,
+                    "target_url": state.target_url,
+                    "auth_method": state.auth_method.value,
+                },
+                fmt="json",
+            )
         else:
             print_success(f"Session '{name}' created for {target}")
     except Exception as e:
@@ -888,8 +947,12 @@ def session_list(
         mgr = SessionManager(manager.context, hunt_id)
         sessions = mgr.list_sessions()
         records = [
-            {"name": s.name, "target_url": s.target_url,
-             "auth_method": s.auth_method.value, "is_valid": s.is_valid}
+            {
+                "name": s.name,
+                "target_url": s.target_url,
+                "auth_method": s.auth_method.value,
+                "is_valid": s.is_valid,
+            }
             for s in sessions
         ]
         format_output(records, fmt=fmt, title="Sessions")
@@ -931,10 +994,19 @@ app.add_typer(scan_app, name="scan")
 @scan_app.command("nuclei")
 def scan_nuclei(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    targets: Annotated[Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")] = None,
-    severity: Annotated[Optional[str], typer.Option("--severity", "-s", help="Severity filter (e.g., high,critical)")] = None,
-    tags: Annotated[Optional[str], typer.Option("--tags", help="Tag filter (e.g., cve,exposure)")] = None,
-    templates: Annotated[Optional[str], typer.Option("--templates", help="Custom templates directory")] = None,
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")
+    ] = None,
+    severity: Annotated[
+        Optional[str],
+        typer.Option("--severity", "-s", help="Severity filter (e.g., high,critical)"),
+    ] = None,
+    tags: Annotated[
+        Optional[str], typer.Option("--tags", help="Tag filter (e.g., cve,exposure)")
+    ] = None,
+    templates: Annotated[
+        Optional[str], typer.Option("--templates", help="Custom templates directory")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -945,9 +1017,16 @@ def scan_nuclei(
 
         hunt = manager.get(hunt_id)
         target_list = [t.strip() for t in targets.split(",")] if targets else None
-        result = asyncio.run(scan.nuclei_scan(
-            manager.context, hunt, target_list, severity, tags, templates,
-        ))
+        result = asyncio.run(
+            scan.nuclei_scan(
+                manager.context,
+                hunt,
+                target_list,
+                severity,
+                tags,
+                templates,
+            )
+        )
         if fmt == "json":
             format_output(
                 {"tool": "nuclei", "found": len(result.records), "records": result.records},
@@ -955,7 +1034,8 @@ def scan_nuclei(
             )
         else:
             format_output(
-                result.records, fmt="table",
+                result.records,
+                fmt="table",
                 columns=["template_id", "severity", "url", "template_name"],
                 title="Nuclei Findings",
             )
@@ -1036,10 +1116,14 @@ def test_ssrf_cmd(
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
-        result = asyncio.run(vuln.test_ssrf(
-            client, url, method,
-            injection_points=[{"location": "url_param", "name": param}],
-        ))
+        result = asyncio.run(
+            vuln.test_ssrf(
+                client,
+                url,
+                method,
+                injection_points=[{"location": "url_param", "name": param}],
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="SSRF Test Result")
     except Exception as e:
         print_error(str(e))
@@ -1071,9 +1155,14 @@ def test_xss_cmd(
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
-        result = asyncio.run(vuln.test_xss(
-            client, url, method, params={param: ""},
-        ))
+        result = asyncio.run(
+            vuln.test_xss(
+                client,
+                url,
+                method,
+                params={param: ""},
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="XSS Test Result")
     except Exception as e:
         print_error(str(e))
@@ -1105,9 +1194,14 @@ def test_sqli_cmd(
         sink = HttpHistorySink(manager.context, hunt_id)
         client = HttpClient(sink)
 
-        result = asyncio.run(vuln.test_sqli(
-            client, url, method, params={param: "1"},
-        ))
+        result = asyncio.run(
+            vuln.test_sqli(
+                client,
+                url,
+                method,
+                params={param: "1"},
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="SQLi Test Result")
     except Exception as e:
         print_error(str(e))
@@ -1166,8 +1260,12 @@ def ctx_http_history(
     manager = _get_manager(data_dir)
     try:
         records = manager.context.query_http_history(
-            hunt_id, host=host, method=method, status_code=status,
-            source=source, limit=limit,
+            hunt_id,
+            host=host,
+            method=method,
+            status_code=status,
+            source=source,
+            limit=limit,
         )
         # Simplify for display
         for r in records:
@@ -1178,7 +1276,8 @@ def ctx_http_history(
             r.pop("request_body_ref", None)
             r.pop("response_body_ref", None)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["id", "method", "url", "status_code", "source", "elapsed_ms", "session_name"],
             title="HTTP History",
         )
@@ -1190,7 +1289,9 @@ def ctx_http_history(
 def ctx_findings(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     type_: Annotated[Optional[str], typer.Option("--type", help="Filter by finding type")] = None,
-    severity: Annotated[Optional[str], typer.Option("--severity", help="Filter by severity")] = None,
+    severity: Annotated[
+        Optional[str], typer.Option("--severity", help="Filter by severity")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1199,7 +1300,8 @@ def ctx_findings(
     try:
         records = manager.context.get_findings(hunt_id, finding_type=type_, severity=severity)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["finding_type", "severity", "title", "url", "confirmed"],
             title="Findings",
         )
@@ -1218,7 +1320,8 @@ def ctx_sessions(
     try:
         records = manager.context.get_sessions(hunt_id)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["name", "target_url", "auth_method", "is_valid", "last_used_at"],
             title="Sessions",
         )
@@ -1237,7 +1340,8 @@ def ctx_oob(
     try:
         records = manager.context.get_oob_listeners(hunt_id)
         format_output(
-            records, fmt=fmt,
+            records,
+            fmt=fmt,
             columns=["listener_id", "callback_domain", "purpose", "target_url", "parameter"],
             title="OOB Listeners",
         )

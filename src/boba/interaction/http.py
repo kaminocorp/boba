@@ -311,10 +311,9 @@ class HttpClient:
         # Detect anomalies: responses that differ from baseline
         anomalies = []
         for entry in results:
-            is_anomaly = (
-                entry["status_code"] != baseline_status
-                or abs(entry["body_length"] - baseline_length) > max(50, baseline_length * 0.1)
-            )
+            is_anomaly = entry["status_code"] != baseline_status or abs(
+                entry["body_length"] - baseline_length
+            ) > max(50, baseline_length * 0.1)
             if is_anomaly:
                 anomalies.append(entry)
 
@@ -351,10 +350,7 @@ class HttpClient:
         elif attack_type == FuzzAttackType.PITCHFORK:
             # Positions paired by index
             payload_lists = [payloads.get(pos, []) for pos in positions]
-            return [
-                dict(zip(positions, vals))
-                for vals in zip(*payload_lists)
-            ]
+            return [dict(zip(positions, vals)) for vals in zip(*payload_lists)]
 
         elif attack_type == FuzzAttackType.CLUSTER_BOMB:
             # Cartesian product — cap to prevent accidental OOM
@@ -366,7 +362,9 @@ class HttpClient:
                 logger.warning(
                     "Cluster bomb would generate %d combinations (cap: %d). "
                     "Truncating to first %d.",
-                    total, MAX_FUZZ_COMBINATIONS, MAX_FUZZ_COMBINATIONS,
+                    total,
+                    MAX_FUZZ_COMBINATIONS,
+                    MAX_FUZZ_COMBINATIONS,
                 )
             combos = []
             for vals in itertools.product(*payload_lists):

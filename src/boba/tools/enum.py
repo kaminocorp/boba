@@ -58,8 +58,13 @@ async def crawl(
 
     if not targets:
         return ToolResult(
-            tool_name="katana", command=[], exit_code=0,
-            raw_stdout="", raw_stderr="", duration_seconds=0.0, records=[],
+            tool_name="katana",
+            command=[],
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            duration_seconds=0.0,
+            records=[],
         )
 
     config = copy.deepcopy(config) if config else AdapterConfig()

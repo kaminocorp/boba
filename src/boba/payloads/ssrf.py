@@ -9,10 +9,10 @@ LOCALHOST: list[str] = [
     "http://localhost",
     "http://0.0.0.0",
     "http://[::1]",
-    "http://0177.0.0.1",       # Octal
-    "http://2130706433",        # Decimal
-    "http://0x7f000001",        # Hex
-    "http://127.1",             # Short form
+    "http://0177.0.0.1",  # Octal
+    "http://2130706433",  # Decimal
+    "http://0x7f000001",  # Hex
+    "http://127.1",  # Short form
     "http://127.0.1",
 ]
 

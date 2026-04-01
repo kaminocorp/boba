@@ -86,7 +86,9 @@ class TestIDOR:
 
         client.request = mock_request
         result = await vuln.test_idor(
-            client, session_a, session_b,
+            client,
+            session_a,
+            session_b,
             endpoint="https://app.example.com/api/users/123",
         )
         assert result.vulnerable is True
@@ -110,7 +112,9 @@ class TestIDOR:
 
         client.request = mock_request
         result = await vuln.test_idor(
-            client, session_a, session_b,
+            client,
+            session_a,
+            session_b,
             endpoint="https://app.example.com/api/users/123",
         )
         assert result.vulnerable is False
@@ -176,7 +180,7 @@ class TestXSS:
             # Server decodes URL params and reflects them (simulating reflected XSS)
             decoded_url = unquote(url)
             if "alert(1)" in decoded_url:
-                return _make_response(200, '<p>Search: <script>alert(1)</script></p>', call_count)
+                return _make_response(200, "<p>Search: <script>alert(1)</script></p>", call_count)
             return _make_response(200, "<p>Search: safe</p>", call_count)
 
         client.request = mock_request
@@ -201,9 +205,7 @@ class TestXSS:
         async def mock_request(**kwargs):
             nonlocal call_count
             call_count += 1
-            return _make_response(
-                200, f"<p>Search: {inner}</p>", call_count
-            )
+            return _make_response(200, f"<p>Search: {inner}</p>", call_count)
 
         client.request = mock_request
         result = await vuln.test_xss(

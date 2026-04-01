@@ -56,26 +56,36 @@ async def test_idor(
 
     # Request as User A (owner)
     resp_a = await http_client.request(
-        method=method, url=endpoint,
-        headers=session_a.headers, cookies=session_a.cookies,
-        body=body, source="test_idor",
-        session_name=session_a.name, tags=["idor", "user_a"],
+        method=method,
+        url=endpoint,
+        headers=session_a.headers,
+        cookies=session_a.cookies,
+        body=body,
+        source="test_idor",
+        session_name=session_a.name,
+        tags=["idor", "user_a"],
     )
     request_ids.append(resp_a.request_id)
 
     # Request as User B (attacker)
     resp_b = await http_client.request(
-        method=method, url=endpoint,
-        headers=session_b.headers, cookies=session_b.cookies,
-        body=body, source="test_idor",
-        session_name=session_b.name, tags=["idor", "user_b"],
+        method=method,
+        url=endpoint,
+        headers=session_b.headers,
+        cookies=session_b.cookies,
+        body=body,
+        source="test_idor",
+        session_name=session_b.name,
+        tags=["idor", "user_b"],
     )
     request_ids.append(resp_b.request_id)
 
     # Request with no auth
     resp_unauth = await http_client.request(
-        method=method, url=endpoint,
-        body=body, source="test_idor",
+        method=method,
+        url=endpoint,
+        body=body,
+        source="test_idor",
         tags=["idor", "no_auth"],
     )
     request_ids.append(resp_unauth.request_id)
@@ -123,14 +133,16 @@ async def test_idor(
                 "The endpoint may be intentionally public or may have broken access control."
             )
 
-    evidence.append({
-        "user_a_status": resp_a.status_code,
-        "user_b_status": resp_b.status_code,
-        "unauth_status": resp_unauth.status_code,
-        "body_length_a": len(resp_a.body),
-        "body_length_b": len(resp_b.body),
-        "body_length_unauth": len(resp_unauth.body),
-    })
+    evidence.append(
+        {
+            "user_a_status": resp_a.status_code,
+            "user_b_status": resp_b.status_code,
+            "unauth_status": resp_unauth.status_code,
+            "body_length_a": len(resp_a.body),
+            "body_length_b": len(resp_b.body),
+            "body_length_unauth": len(resp_unauth.body),
+        }
+    )
 
     # Test additional object IDs if provided (run regardless of confidence
     # to gather enumeration evidence that can upgrade a POSSIBLE to CONFIRMED)
@@ -142,9 +154,12 @@ async def test_idor(
             path_parts[-1] = obj_id
             test_url = urlunparse(parsed_ep._replace(path="/".join(path_parts)))
             resp = await http_client.request(
-                method=method, url=test_url,
-                headers=session_b.headers, cookies=session_b.cookies,
-                source="test_idor", session_name=session_b.name,
+                method=method,
+                url=test_url,
+                headers=session_b.headers,
+                cookies=session_b.cookies,
+                source="test_idor",
+                session_name=session_b.name,
                 tags=["idor", "enum"],
             )
             request_ids.append(resp.request_id)
@@ -166,7 +181,9 @@ async def test_idor(
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Implement proper authorization checks per-resource"] if vulnerable else [],
+        recommendations=["Implement proper authorization checks per-resource"]
+        if vulnerable
+        else [],
     )
 
 
@@ -204,8 +221,10 @@ async def test_ssrf(
             test_url = _inject_param(url, param_name, payload)
 
             resp = await http_client.request(
-                method=method, url=test_url,
-                headers=headers, cookies=cookies,
+                method=method,
+                url=test_url,
+                headers=headers,
+                cookies=cookies,
                 source="test_ssrf",
                 tags=["ssrf", param_name],
             )
@@ -216,23 +235,25 @@ async def test_ssrf(
             # Use context-aware regex to reduce false positives from
             # product names or error messages containing indicator substrings.
             ssrf_indicator_patterns = [
-                (r"root:[^:]*:\d+:\d+:", "passwd_entry"),       # /etc/passwd format
-                (r"/bin/(ba)?sh", "shell_path"),                 # Shell binary path
-                (r"ami-[0-9a-f]{5,}", "aws_ami_id"),            # AWS AMI ID format
-                (r"instance-id\b", "aws_instance"),              # AWS metadata field
-                (r"computeMetadata/", "gcp_metadata"),           # GCP metadata path
+                (r"root:[^:]*:\d+:\d+:", "passwd_entry"),  # /etc/passwd format
+                (r"/bin/(ba)?sh", "shell_path"),  # Shell binary path
+                (r"ami-[0-9a-f]{5,}", "aws_ami_id"),  # AWS AMI ID format
+                (r"instance-id\b", "aws_instance"),  # AWS metadata field
+                (r"computeMetadata/", "gcp_metadata"),  # GCP metadata path
             ]
             for pattern, indicator_type in ssrf_indicator_patterns:
                 if re.search(pattern, resp.body_text, re.IGNORECASE):
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
-                    evidence.append({
-                        "payload": payload,
-                        "param": param_name,
-                        "indicator": indicator_type,
-                        "status_code": resp.status_code,
-                        "request_id": resp.request_id,
-                    })
+                    evidence.append(
+                        {
+                            "payload": payload,
+                            "param": param_name,
+                            "indicator": indicator_type,
+                            "status_code": resp.status_code,
+                            "request_id": resp.request_id,
+                        }
+                    )
                     break
 
             # Cloud metadata 200 check — always collect evidence even if
@@ -241,12 +262,14 @@ async def test_ssrf(
                 if not vulnerable:
                     vulnerable = True
                     confidence = Confidence.LIKELY
-                evidence.append({
-                    "payload": payload,
-                    "param": param_name,
-                    "note": "200 response for cloud metadata URL",
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "payload": payload,
+                        "param": param_name,
+                        "note": "200 response for cloud metadata URL",
+                        "request_id": resp.request_id,
+                    }
+                )
 
             # Stop testing this injection point once confirmed
             if confidence == Confidence.CONFIRMED:
@@ -268,24 +291,27 @@ async def test_ssrf(
             test_url = _inject_param(url, param_name, oob_url)
 
             resp = await http_client.request(
-                method=method, url=test_url,
-                headers=headers, cookies=cookies,
-                source="test_ssrf", tags=["ssrf", "blind"],
+                method=method,
+                url=test_url,
+                headers=headers,
+                cookies=cookies,
+                source="test_ssrf",
+                tags=["ssrf", "blind"],
             )
             request_ids.append(resp.request_id)
 
         # Poll for callbacks
-        interactions = await oob_manager.poll(
-            timeout_seconds=poll_timeout_seconds
-        )
+        interactions = await oob_manager.poll(timeout_seconds=poll_timeout_seconds)
         if interactions:
             vulnerable = True
             confidence = Confidence.CONFIRMED
             for i in interactions:
-                evidence.append({
-                    "type": "oob_callback",
-                    "interaction": i,
-                })
+                evidence.append(
+                    {
+                        "type": "oob_callback",
+                        "interaction": i,
+                    }
+                )
 
     return VulnTestResult(
         test_type="ssrf",
@@ -296,7 +322,9 @@ async def test_ssrf(
         severity=Severity.CRITICAL if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Validate and whitelist URLs server-side", "Block internal IPs"] if vulnerable else [],
+        recommendations=["Validate and whitelist URLs server-side", "Block internal IPs"]
+        if vulnerable
+        else [],
     )
 
 
@@ -333,9 +361,12 @@ async def test_xss(
             test_url = _inject_param(url, param_name, payload)
 
             resp = await http_client.request(
-                method=method, url=test_url,
-                headers=headers, cookies=cookies,
-                source="test_xss", tags=["xss", param_name],
+                method=method,
+                url=test_url,
+                headers=headers,
+                cookies=cookies,
+                source="test_xss",
+                tags=["xss", param_name],
             )
             request_ids.append(resp.request_id)
 
@@ -346,24 +377,28 @@ async def test_xss(
             if payload in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
-                evidence.append({
-                    "type": "reflected",
-                    "payload": payload,
-                    "param": param_name,
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "reflected",
+                        "payload": payload,
+                        "param": param_name,
+                        "request_id": resp.request_id,
+                    }
+                )
                 break  # Found confirmed XSS for this param
 
             if decoded_payload != payload and decoded_payload in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
-                evidence.append({
-                    "type": "reflected_decoded",
-                    "payload": payload,
-                    "decoded": decoded_payload,
-                    "param": param_name,
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "reflected_decoded",
+                        "payload": payload,
+                        "decoded": decoded_payload,
+                        "param": param_name,
+                        "request_id": resp.request_id,
+                    }
+                )
                 break
 
             # Check for partial reflection: extract inner content between tags
@@ -376,13 +411,15 @@ async def test_xss(
             if inner and len(inner) >= 16 and has_js_context and inner in resp.body_text:
                 vulnerable = True
                 confidence = Confidence.POSSIBLE
-                evidence.append({
-                    "type": "partial_reflection",
-                    "payload": payload,
-                    "param": param_name,
-                    "note": f"Inner content '{inner}' reflected without tags",
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "partial_reflection",
+                        "payload": payload,
+                        "param": param_name,
+                        "note": f"Inner content '{inner}' reflected without tags",
+                        "request_id": resp.request_id,
+                    }
+                )
 
         if vulnerable:
             break
@@ -397,12 +434,14 @@ async def test_xss(
                 if fired:
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
-                    evidence.append({
-                        "type": "dom_based",
-                        "payload": canary,
-                        "param": param_name,
-                        "url": test_url,
-                    })
+                    evidence.append(
+                        {
+                            "type": "dom_based",
+                            "payload": canary,
+                            "param": param_name,
+                            "url": test_url,
+                        }
+                    )
                     break
             if vulnerable:
                 break
@@ -416,7 +455,9 @@ async def test_xss(
         severity=Severity.MEDIUM if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Encode output contextually", "Implement Content-Security-Policy"] if vulnerable else [],
+        recommendations=["Encode output contextually", "Implement Content-Security-Policy"]
+        if vulnerable
+        else [],
     )
 
 
@@ -450,9 +491,12 @@ async def test_sqli(
         # are against the same endpoint shape (not the bare URL without the param).
         baseline_url = _inject_param(url, param_name, default_val)
         resp_baseline = await http_client.request(
-            method=method, url=baseline_url,
-            headers=headers, cookies=cookies,
-            source="test_sqli", tags=["sqli", "baseline"],
+            method=method,
+            url=baseline_url,
+            headers=headers,
+            cookies=cookies,
+            source="test_sqli",
+            tags=["sqli", "baseline"],
         )
         request_ids.append(resp_baseline.request_id)
         # Error-based detection
@@ -460,9 +504,12 @@ async def test_sqli(
             test_url = _inject_param(url, param_name, f"{default_val}{payload}")
 
             resp = await http_client.request(
-                method=method, url=test_url,
-                headers=headers, cookies=cookies,
-                source="test_sqli", tags=["sqli", "error_based"],
+                method=method,
+                url=test_url,
+                headers=headers,
+                cookies=cookies,
+                source="test_sqli",
+                tags=["sqli", "error_based"],
             )
             request_ids.append(resp.request_id)
 
@@ -472,13 +519,15 @@ async def test_sqli(
                 if sig.lower() in body_lower:
                     vulnerable = True
                     confidence = Confidence.CONFIRMED
-                    evidence.append({
-                        "type": "error_based",
-                        "payload": payload,
-                        "param": param_name,
-                        "error_signature": sig,
-                        "request_id": resp.request_id,
-                    })
+                    evidence.append(
+                        {
+                            "type": "error_based",
+                            "payload": payload,
+                            "param": param_name,
+                            "error_signature": sig,
+                            "request_id": resp.request_id,
+                        }
+                    )
                     break
             if vulnerable:
                 break
@@ -493,14 +542,18 @@ async def test_sqli(
         resp_true = await http_client.request(
             method=method,
             url=_inject_param(url, param_name, f"{default_val}{true_payload}"),
-            headers=headers, cookies=cookies,
-            source="test_sqli", tags=["sqli", "boolean_true"],
+            headers=headers,
+            cookies=cookies,
+            source="test_sqli",
+            tags=["sqli", "boolean_true"],
         )
         resp_false = await http_client.request(
             method=method,
             url=_inject_param(url, param_name, f"{default_val}{false_payload}"),
-            headers=headers, cookies=cookies,
-            source="test_sqli", tags=["sqli", "boolean_false"],
+            headers=headers,
+            cookies=cookies,
+            source="test_sqli",
+            tags=["sqli", "boolean_false"],
         )
         request_ids.extend([resp_true.request_id, resp_false.request_id])
 
@@ -517,13 +570,15 @@ async def test_sqli(
         ):
             vulnerable = True
             confidence = Confidence.LIKELY
-            evidence.append({
-                "type": "boolean_based",
-                "param": param_name,
-                "true_length": len(resp_true.body),
-                "false_length": len(resp_false.body),
-                "diff": len_diff,
-            })
+            evidence.append(
+                {
+                    "type": "boolean_based",
+                    "param": param_name,
+                    "true_length": len(resp_true.body),
+                    "false_length": len(resp_false.body),
+                    "diff": len_diff,
+                }
+            )
 
         # Time-based detection — only if not already confirmed via error/boolean.
         # Uses multiple baseline samples to reduce false positives from network jitter.
@@ -538,9 +593,12 @@ async def test_sqli(
             baseline_samples = [resp_baseline.elapsed_ms]
             for _ in range(2):
                 resp_bl = await http_client.request(
-                    method=method, url=baseline_url,
-                    headers=headers, cookies=cookies,
-                    source="test_sqli", tags=["sqli", "baseline_timing"],
+                    method=method,
+                    url=baseline_url,
+                    headers=headers,
+                    cookies=cookies,
+                    source="test_sqli",
+                    tags=["sqli", "baseline_timing"],
                 )
                 request_ids.append(resp_bl.request_id)
                 baseline_samples.append(resp_bl.elapsed_ms)
@@ -549,9 +607,12 @@ async def test_sqli(
             for payload in time_payloads:
                 test_url = _inject_param(url, param_name, f"{default_val}{payload}")
                 resp_time = await http_client.request(
-                    method=method, url=test_url,
-                    headers=headers, cookies=cookies,
-                    source="test_sqli", tags=["sqli", "time_based"],
+                    method=method,
+                    url=test_url,
+                    headers=headers,
+                    cookies=cookies,
+                    source="test_sqli",
+                    tags=["sqli", "time_based"],
                     timeout_seconds=15.0,
                 )
                 request_ids.append(resp_time.request_id)
@@ -560,15 +621,17 @@ async def test_sqli(
                 if delay_ms >= 3000:
                     vulnerable = True
                     confidence = Confidence.LIKELY
-                    evidence.append({
-                        "type": "time_based",
-                        "payload": payload,
-                        "param": param_name,
-                        "baseline_median_ms": baseline_median,
-                        "response_ms": resp_time.elapsed_ms,
-                        "delay_ms": delay_ms,
-                        "request_id": resp_time.request_id,
-                    })
+                    evidence.append(
+                        {
+                            "type": "time_based",
+                            "payload": payload,
+                            "param": param_name,
+                            "baseline_median_ms": baseline_median,
+                            "response_ms": resp_time.elapsed_ms,
+                            "delay_ms": delay_ms,
+                            "request_id": resp_time.request_id,
+                        }
+                    )
                     break
 
     return VulnTestResult(
@@ -576,11 +639,15 @@ async def test_sqli(
         vulnerable=vulnerable,
         confidence=confidence,
         title=f"SQL Injection on {url}",
-        description="SQL injection detected via error or boolean-based analysis" if vulnerable else "",
+        description="SQL injection detected via error or boolean-based analysis"
+        if vulnerable
+        else "",
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Use parameterized queries", "Implement input validation"] if vulnerable else [],
+        recommendations=["Use parameterized queries", "Implement input validation"]
+        if vulnerable
+        else [],
     )
 
 
@@ -603,19 +670,23 @@ async def test_auth(
 
     # Test 1: No auth → should be denied
     resp_noauth = await http_client.request(
-        method="GET", url=endpoint,
-        source="test_auth", tags=["auth", "no_auth"],
+        method="GET",
+        url=endpoint,
+        source="test_auth",
+        tags=["auth", "no_auth"],
     )
     request_ids.append(resp_noauth.request_id)
 
     if 200 <= resp_noauth.status_code < 400:
         vulnerable = True
         confidence = Confidence.CONFIRMED
-        evidence.append({
-            "type": "no_auth_access",
-            "status_code": resp_noauth.status_code,
-            "note": "Endpoint accessible without any authentication",
-        })
+        evidence.append(
+            {
+                "type": "no_auth_access",
+                "status_code": resp_noauth.status_code,
+                "note": "Endpoint accessible without any authentication",
+            }
+        )
 
     # Test 2: JWT manipulation (if token provided)
     if jwt_token and not vulnerable:
@@ -623,39 +694,47 @@ async def test_auth(
             # None algorithm attack
             none_token = auth_payloads.jwt_none_algorithm(jwt_token)
             resp_none = await http_client.request(
-                method="GET", url=endpoint,
+                method="GET",
+                url=endpoint,
                 headers={"Authorization": f"Bearer {none_token}"},
-                source="test_auth", tags=["auth", "jwt_none"],
+                source="test_auth",
+                tags=["auth", "jwt_none"],
             )
             request_ids.append(resp_none.request_id)
 
             if 200 <= resp_none.status_code < 400:
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
-                evidence.append({
-                    "type": "jwt_none_algorithm",
-                    "status_code": resp_none.status_code,
-                    "note": "JWT with alg=none accepted",
-                })
+                evidence.append(
+                    {
+                        "type": "jwt_none_algorithm",
+                        "status_code": resp_none.status_code,
+                        "note": "JWT with alg=none accepted",
+                    }
+                )
 
             # Claim escalation
             for claims in auth_payloads.ESCALATION_CLAIMS:
                 modified_token = auth_payloads.jwt_modify_claims(jwt_token, claims)
                 resp_esc = await http_client.request(
-                    method="GET", url=endpoint,
+                    method="GET",
+                    url=endpoint,
                     headers={"Authorization": f"Bearer {modified_token}"},
-                    source="test_auth", tags=["auth", "jwt_escalation"],
+                    source="test_auth",
+                    tags=["auth", "jwt_escalation"],
                 )
                 request_ids.append(resp_esc.request_id)
 
                 if 200 <= resp_esc.status_code < 400:
                     vulnerable = True
                     confidence = Confidence.LIKELY
-                    evidence.append({
-                        "type": "jwt_claim_escalation",
-                        "modified_claims": claims,
-                        "status_code": resp_esc.status_code,
-                    })
+                    evidence.append(
+                        {
+                            "type": "jwt_claim_escalation",
+                            "modified_claims": claims,
+                            "status_code": resp_esc.status_code,
+                        }
+                    )
                     break
 
         except (ValueError, KeyError, IndexError):
@@ -665,9 +744,12 @@ async def test_auth(
     # Test 3: With valid session but accessing admin-like endpoints
     if session and not vulnerable:
         resp_auth = await http_client.request(
-            method="GET", url=endpoint,
-            headers=session.headers, cookies=session.cookies,
-            source="test_auth", session_name=session.name,
+            method="GET",
+            url=endpoint,
+            headers=session.headers,
+            cookies=session.cookies,
+            source="test_auth",
+            session_name=session.name,
             tags=["auth", "session"],
         )
         request_ids.append(resp_auth.request_id)
@@ -680,12 +762,14 @@ async def test_auth(
             if _ADMIN_RE.search(endpoint):
                 vulnerable = True
                 confidence = Confidence.LIKELY
-                evidence.append({
-                    "type": "privilege_escalation",
-                    "endpoint": endpoint,
-                    "status_code": resp_auth.status_code,
-                    "note": f"User '{session.name}' can access admin-like endpoint",
-                })
+                evidence.append(
+                    {
+                        "type": "privilege_escalation",
+                        "endpoint": endpoint,
+                        "status_code": resp_auth.status_code,
+                        "note": f"User '{session.name}' can access admin-like endpoint",
+                    }
+                )
 
     return VulnTestResult(
         test_type="auth",
@@ -700,7 +784,9 @@ async def test_auth(
             "Enforce authentication on all protected endpoints",
             "Validate JWT signatures server-side",
             "Implement role-based access control",
-        ] if vulnerable else [],
+        ]
+        if vulnerable
+        else [],
     )
 
 

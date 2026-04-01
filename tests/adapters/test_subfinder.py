@@ -43,12 +43,18 @@ async def test_full_run_with_mock(scope_engine):
     adapter = SubfinderAdapter(scope_engine=scope_engine)
 
     mock_result = SubprocessResult(
-        stdout=SAMPLE_OUTPUT, stderr="", exit_code=0, duration=1.5, timed_out=False,
+        stdout=SAMPLE_OUTPUT,
+        stderr="",
+        exit_code=0,
+        duration=1.5,
+        timed_out=False,
     )
 
     with (
         patch.object(adapter, "find_binary", return_value="/usr/bin/subfinder"),
-        patch("boba.adapters.base.run_subprocess", new_callable=AsyncMock, return_value=mock_result),
+        patch(
+            "boba.adapters.base.run_subprocess", new_callable=AsyncMock, return_value=mock_result
+        ),
     ):
         result = await adapter.run(targets=["example.com"])
 

@@ -21,20 +21,19 @@ class WhatwebAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "gem install whatweb  # or: apt install whatweb"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], Path]:
-        tf = tempfile.NamedTemporaryFile(
-            suffix=".json", prefix="boba_whatweb_", delete=False
-        )
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], Path]:
+        tf = tempfile.NamedTemporaryFile(suffix=".json", prefix="boba_whatweb_", delete=False)
         tf.close()
         output_file = Path(tf.name)
         input_file = self._create_temp_file(targets)
         cmd = [
             str(self._binary_path),
-            "--input-file", str(input_file),
-            "--log-json", str(output_file),
-            "-a", "3",
+            "--input-file",
+            str(input_file),
+            "--log-json",
+            str(output_file),
+            "-a",
+            "3",
             "--quiet",
         ]
         cmd.extend(config.extra_args)

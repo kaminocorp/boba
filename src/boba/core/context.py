@@ -300,13 +300,26 @@ class HuntContext:
     def create_hunt(self, hunt: Hunt) -> str:
         now = _now()
         scope_json = json.dumps(
-            {"rules": [{"pattern": r.pattern, "type": r.rule_type.value, "action": r.action.value} for r in hunt.scope.rules]}
+            {
+                "rules": [
+                    {"pattern": r.pattern, "type": r.rule_type.value, "action": r.action.value}
+                    for r in hunt.scope.rules
+                ]
+            }
         )
         with self._conn:
             self._conn.execute(
                 "INSERT INTO hunts (id, name, status, scope_json, config_json, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (hunt.id, hunt.name, hunt.status.value, scope_json, json.dumps(hunt.config), now, now),
+                (
+                    hunt.id,
+                    hunt.name,
+                    hunt.status.value,
+                    scope_json,
+                    json.dumps(hunt.config),
+                    now,
+                    now,
+                ),
             )
             for rule in hunt.scope.rules:
                 self._conn.execute(
@@ -421,12 +434,23 @@ class HuntContext:
                 last_seen_at = excluded.last_seen_at,
                 last_checked_at = excluded.last_checked_at""",
             (
-                hunt_id, record.get("host", ""), record.get("ip"),
-                record.get("port") or 0, record.get("scheme") or "",
-                record.get("url"), record.get("status_code"),
-                record.get("title"), record.get("webserver"), record.get("content_length"),
-                record.get("content_type"), techs, record.get("tls_version"),
-                record.get("final_url"), now, now, now,
+                hunt_id,
+                record.get("host", ""),
+                record.get("ip"),
+                record.get("port") or 0,
+                record.get("scheme") or "",
+                record.get("url"),
+                record.get("status_code"),
+                record.get("title"),
+                record.get("webserver"),
+                record.get("content_length"),
+                record.get("content_type"),
+                techs,
+                record.get("tls_version"),
+                record.get("final_url"),
+                now,
+                now,
+                now,
             ),
         )
 
@@ -439,8 +463,13 @@ class HuntContext:
                 ip = excluded.ip,
                 last_seen_at = excluded.last_seen_at""",
             (
-                hunt_id, record["host"], record.get("ip"), record["port"],
-                record.get("protocol", "tcp"), now, now,
+                hunt_id,
+                record["host"],
+                record.get("ip"),
+                record["port"],
+                record.get("protocol", "tcp"),
+                now,
+                now,
             ),
         )
 
@@ -468,9 +497,18 @@ class HuntContext:
                 END,
                 last_seen_at = excluded.last_seen_at""",
             (
-                hunt_id, record["url"], record.get("host"), record.get("path"),
-                record.get("query"), record.get("method", "GET"), record.get("status_code"),
-                sources_json, record.get("found_on"), now, now, source,
+                hunt_id,
+                record["url"],
+                record.get("host"),
+                record.get("path"),
+                record.get("query"),
+                record.get("method", "GET"),
+                record.get("status_code"),
+                sources_json,
+                record.get("found_on"),
+                now,
+                now,
+                source,
             ),
         )
 
@@ -502,8 +540,17 @@ class HuntContext:
                     ) WHERE value != '' AND value IS NOT NULL
                 ),
                 last_seen_at = excluded.last_seen_at""",
-            (hunt_id, host, tech["name"], tech.get("version"), tech.get("detail"),
-             sources_json, now, now, source),
+            (
+                hunt_id,
+                host,
+                tech["name"],
+                tech.get("version"),
+                tech.get("detail"),
+                sources_json,
+                now,
+                now,
+                source,
+            ),
         )
 
     def upsert_directory(self, hunt_id: str, record: dict[str, Any]) -> None:
@@ -523,11 +570,17 @@ class HuntContext:
                 redirect_location = excluded.redirect_location,
                 last_seen_at = excluded.last_seen_at""",
             (
-                hunt_id, record["url"], record.get("input_value"),
-                record.get("status_code", 0), record.get("content_length"),
-                record.get("word_count"), record.get("line_count"),
-                record.get("content_type"), record.get("redirect_location"),
-                now, now,
+                hunt_id,
+                record["url"],
+                record.get("input_value"),
+                record.get("status_code", 0),
+                record.get("content_length"),
+                record.get("word_count"),
+                record.get("line_count"),
+                record.get("content_type"),
+                record.get("redirect_location"),
+                now,
+                now,
             ),
         )
 
@@ -606,9 +659,7 @@ class HuntContext:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_directories(
-        self, hunt_id: str, url_prefix: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_directories(self, hunt_id: str, url_prefix: str | None = None) -> list[dict[str, Any]]:
         if url_prefix:
             rows = self._conn.execute(
                 "SELECT * FROM directories WHERE hunt_id = ? AND url LIKE ? ORDER BY url",
@@ -641,10 +692,16 @@ class HuntContext:
                  duration_seconds, exit_code, records_found, records_filtered, timed_out, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                hunt_id, result.tool_name, json.dumps(result.command),
+                hunt_id,
+                result.tool_name,
+                json.dumps(result.command),
                 "completed" if result.exit_code == 0 and not result.timed_out else "failed",
-                started_at, finished_at, result.duration_seconds, result.exit_code,
-                len(result.records), result.filtered_count,
+                started_at,
+                finished_at,
+                result.duration_seconds,
+                result.exit_code,
+                len(result.records),
+                result.filtered_count,
                 1 if result.timed_out else 0,
                 result.raw_stderr[:1000] if result.exit_code != 0 else None,
             ),
@@ -652,16 +709,26 @@ class HuntContext:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    _STATS_TABLES = frozenset({
-        "subdomains", "hosts", "ports", "urls", "technologies",
-        "directories", "http_history", "sessions", "findings",
-    })
+    _STATS_TABLES = frozenset(
+        {
+            "subdomains",
+            "hosts",
+            "ports",
+            "urls",
+            "technologies",
+            "directories",
+            "http_history",
+            "sessions",
+            "findings",
+        }
+    )
 
     def get_hunt_stats(self, hunt_id: str) -> dict[str, int]:
         stats = {}
         for table in sorted(self._STATS_TABLES):
             row = self._conn.execute(
-                f"SELECT COUNT(*) as cnt FROM {table} WHERE hunt_id = ?", (hunt_id,)  # noqa: S608
+                f"SELECT COUNT(*) as cnt FROM {table} WHERE hunt_id = ?",
+                (hunt_id,),  # noqa: S608
             ).fetchone()
             stats[table] = row["cnt"] if row else 0
         # alive hosts specifically
@@ -725,14 +792,14 @@ class HuntContext:
 
     def get_http_record(self, record_id: int) -> dict[str, Any] | None:
         """Get a single HTTP history record by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM http_history WHERE id = ?", (record_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM http_history WHERE id = ?", (record_id,)).fetchone()
         if not row:
             return None
         result = dict(row)
         for field, default in [
-            ("request_headers", "{}"), ("response_headers", "{}"), ("tags", "[]"),
+            ("request_headers", "{}"),
+            ("response_headers", "{}"),
+            ("tags", "[]"),
         ]:
             try:
                 result[field] = json.loads(result[field] or default)
@@ -783,7 +850,9 @@ class HuntContext:
         for row in rows:
             r = dict(row)
             for field, default in [
-                ("request_headers", "{}"), ("response_headers", "{}"), ("tags", "[]"),
+                ("request_headers", "{}"),
+                ("response_headers", "{}"),
+                ("tags", "[]"),
             ]:
                 try:
                     r[field] = json.loads(r[field] or default)
@@ -807,9 +876,7 @@ class HuntContext:
 
     def update_http_record_notes(self, record_id: int, notes: str) -> None:
         """Set notes on an HTTP history record."""
-        self._conn.execute(
-            "UPDATE http_history SET notes = ? WHERE id = ?", (notes, record_id)
-        )
+        self._conn.execute("UPDATE http_history SET notes = ? WHERE id = ?", (notes, record_id))
         self._conn.commit()
 
     # ═══════════════════ V2: SESSIONS ═══════════════════
@@ -923,9 +990,7 @@ class HuntContext:
 
     def delete_session(self, hunt_id: str, name: str) -> None:
         """Delete a named session."""
-        self._conn.execute(
-            "DELETE FROM sessions WHERE hunt_id = ? AND name = ?", (hunt_id, name)
-        )
+        self._conn.execute("DELETE FROM sessions WHERE hunt_id = ? AND name = ?", (hunt_id, name))
         self._conn.commit()
 
     def touch_session(self, hunt_id: str, name: str) -> None:
@@ -1080,7 +1145,8 @@ class HuntContext:
             except (json.JSONDecodeError, TypeError) as exc:
                 logger.warning(
                     "Malformed interactions for OOB listener %s: %s",
-                    r.get("listener_id", "?"), exc,
+                    r.get("listener_id", "?"),
+                    exc,
                 )
                 r["interactions"] = []
             results.append(r)

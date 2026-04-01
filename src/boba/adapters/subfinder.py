@@ -18,9 +18,7 @@ class SubfinderAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], None]:
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         cmd = [str(self._binary_path), "-json", "-silent", "-all"]
         if len(targets) == 1:
             cmd.extend(["-d", targets[0]])

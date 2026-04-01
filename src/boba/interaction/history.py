@@ -92,9 +92,7 @@ class HttpHistorySink:
         }
         return self._context.insert_http_record(self._hunt_id, record)
 
-    def _prepare_body(
-        self, body: str | bytes | None, prefix: str
-    ) -> tuple[str | None, str | None]:
+    def _prepare_body(self, body: str | bytes | None, prefix: str) -> tuple[str | None, str | None]:
         """Handle body storage: inline for small, file-referenced for large.
 
         Returns (inline_text, file_ref_path).

@@ -10,34 +10,38 @@ from boba.adapters.nuclei import NucleiAdapter
 from boba.core.models import AdapterConfig
 
 
-SAMPLE_NUCLEI_OUTPUT = json.dumps({
-    "template-id": "exposed-env-file",
-    "info": {
-        "name": "Exposed .env File",
-        "severity": "medium",
-        "description": "Environment file is publicly accessible",
-        "reference": ["https://example.com/ref"],
-        "tags": ["exposure", "config"],
-    },
-    "type": "http",
-    "host": "https://app.example.com",
-    "matched-at": "https://app.example.com/.env",
-    "extracted-results": ["DB_PASSWORD=secret"],
-    "curl-command": "curl -X GET https://app.example.com/.env",
-    "matcher-name": "env-keywords",
-})
+SAMPLE_NUCLEI_OUTPUT = json.dumps(
+    {
+        "template-id": "exposed-env-file",
+        "info": {
+            "name": "Exposed .env File",
+            "severity": "medium",
+            "description": "Environment file is publicly accessible",
+            "reference": ["https://example.com/ref"],
+            "tags": ["exposure", "config"],
+        },
+        "type": "http",
+        "host": "https://app.example.com",
+        "matched-at": "https://app.example.com/.env",
+        "extracted-results": ["DB_PASSWORD=secret"],
+        "curl-command": "curl -X GET https://app.example.com/.env",
+        "matcher-name": "env-keywords",
+    }
+)
 
-SAMPLE_NUCLEI_LINE_2 = json.dumps({
-    "template-id": "git-config",
-    "info": {
-        "name": "Git Config Exposure",
-        "severity": "low",
-        "tags": ["git", "exposure"],
-    },
-    "type": "http",
-    "host": "https://app.example.com",
-    "matched-at": "https://app.example.com/.git/config",
-})
+SAMPLE_NUCLEI_LINE_2 = json.dumps(
+    {
+        "template-id": "git-config",
+        "info": {
+            "name": "Git Config Exposure",
+            "severity": "low",
+            "tags": ["git", "exposure"],
+        },
+        "type": "http",
+        "host": "https://app.example.com",
+        "matched-at": "https://app.example.com/.git/config",
+    }
+)
 
 
 @pytest.fixture
@@ -68,9 +72,7 @@ class TestParseRecord:
 class TestBuildCommand:
     def test_single_target(self, adapter):
         adapter._binary_path = "/usr/bin/nuclei"
-        cmd, output_file = adapter.build_command(
-            ["https://example.com"], AdapterConfig()
-        )
+        cmd, output_file = adapter.build_command(["https://example.com"], AdapterConfig())
         assert cmd[0] == "/usr/bin/nuclei"
         assert "-u" in cmd
         assert "https://example.com" in cmd

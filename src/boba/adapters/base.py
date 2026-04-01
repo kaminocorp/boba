@@ -168,7 +168,8 @@ class BaseAdapter(ABC):
             if parse_errors:
                 logger.warning(
                     "%s: %d lines failed to parse (out of %d total)",
-                    self.TOOL_NAME, parse_errors,
+                    self.TOOL_NAME,
+                    parse_errors,
                     parse_errors + len(records),
                 )
 
@@ -186,7 +187,8 @@ class BaseAdapter(ABC):
                 parse_errors += 1
                 logger.warning(
                     "%s: failed to parse JSON output (%d bytes)",
-                    self.TOOL_NAME, len(raw_text),
+                    self.TOOL_NAME,
+                    len(raw_text),
                 )
 
         elif self.OUTPUT_FORMAT == OutputFormat.PLAIN_LINES:
@@ -201,7 +203,8 @@ class BaseAdapter(ABC):
             if parse_errors:
                 logger.warning(
                     "%s: %d lines failed to parse (out of %d total)",
-                    self.TOOL_NAME, parse_errors,
+                    self.TOOL_NAME,
+                    parse_errors,
                     parse_errors + len(records),
                 )
 
@@ -219,16 +222,15 @@ class BaseAdapter(ABC):
                 parse_errors += 1
                 logger.warning(
                     "%s: failed to parse JSON array output (%d bytes)",
-                    self.TOOL_NAME, len(raw_text),
+                    self.TOOL_NAME,
+                    len(raw_text),
                 )
 
         return records, parse_errors
 
     # ── Phase 6: Orchestration ──
 
-    async def run(
-        self, targets: list[str], config: AdapterConfig | None = None
-    ) -> ToolResult:
+    async def run(self, targets: list[str], config: AdapterConfig | None = None) -> ToolResult:
         """
         Full lifecycle execution:
         1. find_binary
@@ -265,7 +267,8 @@ class BaseAdapter(ABC):
             if result.exit_code != 0:
                 logger.warning(
                     "%s exited with code %d%s; stderr: %.200s",
-                    self.TOOL_NAME, result.exit_code,
+                    self.TOOL_NAME,
+                    result.exit_code,
                     " (timed out)" if result.timed_out else "",
                     result.stderr.strip() or "(empty)",
                 )
@@ -293,9 +296,7 @@ class BaseAdapter(ABC):
             if output_file:
                 output_file.unlink(missing_ok=True)
 
-    async def _execute(
-        self, cmd: list[str], config: AdapterConfig
-    ) -> SubprocessResult:
+    async def _execute(self, cmd: list[str], config: AdapterConfig) -> SubprocessResult:
         """Run the subprocess. Override in adapters that need stdin piping."""
         return await run_subprocess(
             cmd,

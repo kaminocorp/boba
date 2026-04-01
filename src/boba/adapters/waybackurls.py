@@ -24,16 +24,12 @@ class WaybackurlsAdapter(BaseAdapter):
     def install_hint(self) -> str:
         return "go install -v github.com/tomnomnom/waybackurls@latest"
 
-    def build_command(
-        self, targets: list[str], config: AdapterConfig
-    ) -> tuple[list[str], None]:
+    def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], None]:
         cmd = [str(self._binary_path)]
         cmd.extend(config.extra_args)
         return cmd, None
 
-    async def _execute(
-        self, cmd: list[str], config: AdapterConfig
-    ) -> SubprocessResult:
+    async def _execute(self, cmd: list[str], config: AdapterConfig) -> SubprocessResult:
         """Override to pipe targets via stdin (waybackurls reads domains from stdin)."""
         return await run_subprocess(
             cmd,
