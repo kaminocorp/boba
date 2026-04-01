@@ -56,4 +56,4 @@ BLIND_TEMPLATES: list[str] = [
 ]
 
 # All payloads combined (for default usage)
-ALL: list[str] = BASIC + POLYGLOTS + EVENT_HANDLERS + ENCODING_BYPASS
+ALL: list[str] = BASIC + POLYGLOTS + EVENT_HANDLERS + ENCODING_BYPASS + DOM_CANARY

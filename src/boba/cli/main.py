@@ -42,6 +42,16 @@ def _safe_close(manager) -> None:
         pass
 
 
+def _safe_close_http(client) -> None:
+    """Close HttpClient connection pool without masking the original exception."""
+    if client is None:
+        return
+    try:
+        asyncio.run(client.close())
+    except Exception:
+        pass
+
+
 # ═══════════════════ HUNT COMMANDS ═══════════════════
 
 hunt_app = typer.Typer(help="Hunt lifecycle management.")
@@ -673,6 +683,7 @@ def http_request(
 ) -> None:
     """Send a crafted HTTP request."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -705,6 +716,7 @@ def http_request(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -719,6 +731,7 @@ def http_replay(
 ) -> None:
     """Replay a request from HTTP history with modifications."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -753,6 +766,7 @@ def http_replay(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -766,6 +780,7 @@ def http_compare(
 ) -> None:
     """Compare two HTTP responses."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -781,6 +796,7 @@ def http_compare(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -960,6 +976,7 @@ def test_idor_cmd(
 ) -> None:
     """Test for Insecure Direct Object Reference (IDOR)."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -985,6 +1002,7 @@ def test_idor_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -999,6 +1017,7 @@ def test_ssrf_cmd(
 ) -> None:
     """Test for Server-Side Request Forgery (SSRF)."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -1018,6 +1037,7 @@ def test_ssrf_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -1032,6 +1052,7 @@ def test_xss_cmd(
 ) -> None:
     """Test for Cross-Site Scripting (XSS)."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -1050,6 +1071,7 @@ def test_xss_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -1064,6 +1086,7 @@ def test_sqli_cmd(
 ) -> None:
     """Test for SQL Injection."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -1082,6 +1105,7 @@ def test_sqli_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 
@@ -1095,6 +1119,7 @@ def test_auth_cmd(
 ) -> None:
     """Test authentication/authorization controls."""
     manager = _get_manager(data_dir)
+    client = None
     try:
         from boba.interaction.history import HttpHistorySink
         from boba.interaction.http import HttpClient
@@ -1111,6 +1136,7 @@ def test_auth_cmd(
         print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _safe_close_http(client)
         _safe_close(manager)
 
 

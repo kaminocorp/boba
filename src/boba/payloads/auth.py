@@ -15,7 +15,7 @@ def jwt_decode_parts(token: str) -> tuple[dict, dict, str]:
 
     def _decode(s: str) -> dict:
         # Add padding
-        padded = s + "=" * (4 - len(s) % 4)
+        padded = s + "=" * ((4 - len(s) % 4) % 4)
         return json.loads(base64.urlsafe_b64decode(padded))
 
     return _decode(parts[0]), _decode(parts[1]), parts[2]

@@ -42,7 +42,10 @@ class WhatwebAdapter(BaseAdapter):
 
     def parse_record(self, raw: dict[str, Any]) -> dict[str, Any]:
         technologies = []
-        for name, details in raw.get("plugins", {}).items():
+        plugins = raw.get("plugins", {})
+        if not isinstance(plugins, dict):
+            plugins = {}
+        for name, details in plugins.items():
             tech: dict[str, Any] = {"name": name}
             if isinstance(details, dict):
                 versions = details.get("version", [])

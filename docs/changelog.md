@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.2.9](#029--v3-readiness-final-gate) — HttpClient connection leak fix, JWT padding bug, null-safe tech flattening, whatweb type guard, body similarity boundary, str() command args, XSS DOM canary, 7 fixes total
 - [0.2.8](#028--v3-readiness-gate) — Scope URL prefix bypass, HttpClient network resilience, SQLi multi-baseline timing, SSRF/XSS false-positive reduction, OOB fallback fix, 12 fixes total
 - [0.2.7](#027--pre-v3-final-quality-gate) — Critical _safe_close recursion fix, SSRF false-positive cleanup, XSS decoded reflection, OOB O(n*m) fix, session deepcopy, cluster bomb cap, CSS escape, 15 fixes total
 - [0.2.6](#026--final-review--pre-v3-readiness) — Per-request timeout, time-based SQLi, XSS partial reflection, JWT exceptions, IDOR enumeration, CLI safety, 16 fixes total
@@ -10,6 +11,31 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.2.9 — V3 Readiness Final Gate
+
+**Date:** 2026-04-01
+**Scope:** 9 files modified, 116 tests passing (0 regressions)
+
+5-agent parallel codebase review across all layers. Found 2 critical, 4 high, and 1 medium issue surviving all prior hardening rounds. 8 review findings verified as false alarms and not fixed. Score: 7.5/10 → 8.5+/10.
+
+### Critical
+
+- **HttpClient connection pool never closed in CLI** — 8 CLI commands created `HttpClient(sink)` but never called `close()`, leaking httpx TCP connections and file descriptors on every invocation. Added `_safe_close_http()` helper with cleanup in all 8 finally blocks.
+- **JWT base64 padding adds 4 extra bytes** — `(4 - len(s) % 4)` produces 4 when length is already a multiple of 4. Fixed to `(4 - len(s) % 4) % 4`.
+
+### High
+
+- **`recon.tech()` crashes on null technologies** — `record.get("technologies", [])` doesn't handle present-but-None values; changed to `record.get("technologies") or []`
+- **WhatwebAdapter crashes on non-dict plugins** — `raw.get("plugins", {}).items()` fails if plugins is a string/list/null; added `isinstance(plugins, dict)` guard
+- **`_bodies_similar()` boundary excludes threshold** — `len_ratio <= threshold` excluded the exact boundary value (0.8); changed to `< threshold` for inclusive comparison
+- **Naabu/Katana command args not converted to string** — `extra_args_dict` values passed directly to subprocess could be integers; wrapped in `str()`
+
+### Medium
+
+- **XSS `ALL` missing DOM canary payloads** — `DOM_CANARY` payloads excluded from `ALL` list; tests using default payloads now include DOM-based detection
 
 ---
 

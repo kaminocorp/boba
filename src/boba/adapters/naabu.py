@@ -29,7 +29,7 @@ class NaabuAdapter(BaseAdapter):
             "-silent",
         ]
         if "ports" in config.extra_args_dict:
-            cmd.extend(["-p", config.extra_args_dict["ports"]])
+            cmd.extend(["-p", str(config.extra_args_dict["ports"])])
         if config.rate_limit:
             cmd.extend(["-rate", str(config.rate_limit)])
         cmd.extend(config.extra_args)

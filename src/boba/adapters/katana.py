@@ -30,7 +30,7 @@ class KatanaAdapter(BaseAdapter):
             "-silent",
             "-js-crawl",
             "-known-files", "all",
-            "-depth", config.extra_args_dict.get("depth", "3"),
+            "-depth", str(config.extra_args_dict.get("depth", "3")),
         ]
         if config.rate_limit:
             cmd.extend(["-rl", str(config.rate_limit)])

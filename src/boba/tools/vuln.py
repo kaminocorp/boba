@@ -704,7 +704,7 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.8) -> boo
         return False
     # Length-ratio heuristic — bodies must be similar length AND share structural overlap
     len_ratio = min(len(body_a), len(body_b)) / max(len(body_a), len(body_b))
-    if len_ratio <= threshold:
+    if len_ratio < threshold:
         return False
     # Check for structural overlap: shared lines as a fraction of total unique lines
     lines_a = set(body_a.split(b"\n"))
