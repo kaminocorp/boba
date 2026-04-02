@@ -40,3 +40,11 @@ class SessionError(BobaError):
 
 class OOBError(BobaError):
     """Error in out-of-band listener management (Interactsh)."""
+
+
+class AnalysisError(BobaError):
+    """Error during finding analysis (dedup, chaining, scoring)."""
+
+
+class ReportError(BobaError):
+    """Error during report generation or formatting."""

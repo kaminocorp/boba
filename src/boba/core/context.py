@@ -280,6 +280,87 @@ CREATE TABLE IF NOT EXISTS oob_listeners (
     expires_at       TEXT,
     UNIQUE(hunt_id, listener_id)
 );
+
+-- ═══════════════════ V3: Analysis tables ═══════════════════
+
+CREATE TABLE IF NOT EXISTS coverage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    url             TEXT NOT NULL,
+    method          TEXT NOT NULL DEFAULT 'GET',
+    parameter       TEXT NOT NULL DEFAULT '',
+    test_type       TEXT NOT NULL,
+    tested_at       TEXT NOT NULL,
+    tool_run_id     INTEGER REFERENCES tool_runs(id),
+    finding_id      INTEGER REFERENCES findings(id),
+    notes           TEXT,
+    UNIQUE(hunt_id, url, method, parameter, test_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coverage_hunt      ON coverage(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_coverage_url       ON coverage(url);
+CREATE INDEX IF NOT EXISTS idx_coverage_test_type ON coverage(test_type);
+
+CREATE TABLE IF NOT EXISTS dedup_groups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    canonical_id    INTEGER NOT NULL REFERENCES findings(id),
+    finding_ids     TEXT NOT NULL DEFAULT '[]',
+    reason          TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    UNIQUE(hunt_id, canonical_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dedup_hunt ON dedup_groups(hunt_id);
+
+CREATE TABLE IF NOT EXISTS chains (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    description     TEXT,
+    severity        TEXT NOT NULL DEFAULT 'info',
+    confidence      TEXT NOT NULL DEFAULT 'hypothetical',
+    cvss_score      REAL,
+    cvss_vector     TEXT,
+    finding_ids     TEXT NOT NULL DEFAULT '[]',
+    chain_order     TEXT NOT NULL DEFAULT '[]',
+    impact          TEXT,
+    prerequisites   TEXT DEFAULT '[]',
+    tags            TEXT DEFAULT '[]',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(hunt_id, title)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chains_hunt     ON chains(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_chains_severity ON chains(severity);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id             TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    finding_id          INTEGER REFERENCES findings(id),
+    chain_id            INTEGER REFERENCES chains(id),
+    title               TEXT NOT NULL,
+    severity            TEXT NOT NULL,
+    cvss_score          REAL,
+    cvss_vector         TEXT,
+    summary             TEXT,
+    steps               TEXT DEFAULT '[]',
+    impact              TEXT,
+    remediation         TEXT,
+    evidence_refs       TEXT DEFAULT '[]',
+    request_ids         TEXT DEFAULT '[]',
+    platform            TEXT,
+    platform_report_id  TEXT,
+    platform_status     TEXT,
+    submitted_at        TEXT,
+    status              TEXT NOT NULL DEFAULT 'draft',
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_hunt   ON reports(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 """
 
 
@@ -757,6 +838,7 @@ class HuntContext:
             "http_history",
             "sessions",
             "findings",
+            "coverage",
         }
     )
 
@@ -1157,3 +1239,387 @@ class HuntContext:
             )
             results.append(r)
         return results
+
+    # ═══════════════════ V3: COVERAGE ═══════════════════
+
+    def upsert_coverage(self, hunt_id: str, entry: dict[str, Any]) -> int:
+        """Record that a URL/parameter was tested with a specific test type.
+
+        Returns the row ID.
+        """
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO coverage
+                (hunt_id, url, method, parameter, test_type, tested_at,
+                 tool_run_id, finding_id, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, url, method, parameter, test_type) DO UPDATE SET
+                tested_at = excluded.tested_at,
+                tool_run_id = COALESCE(excluded.tool_run_id, coverage.tool_run_id),
+                finding_id = COALESCE(excluded.finding_id, coverage.finding_id),
+                notes = COALESCE(excluded.notes, coverage.notes)""",
+            (
+                hunt_id,
+                entry["url"],
+                entry.get("method", "GET"),
+                entry.get("parameter", ""),
+                entry["test_type"],
+                entry.get("tested_at", now),
+                entry.get("tool_run_id"),
+                entry.get("finding_id"),
+                entry.get("notes"),
+            ),
+        )
+        self._maybe_commit()
+        return cursor.lastrowid or 0
+
+    def get_coverage(
+        self,
+        hunt_id: str,
+        url: str | None = None,
+        test_type: str | None = None,
+        host: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query coverage records with optional filters."""
+        sql = "SELECT * FROM coverage WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+
+        if url:
+            sql += " AND url = ?"
+            params.append(url)
+        if test_type:
+            sql += " AND test_type = ?"
+            params.append(test_type)
+        if host:
+            escaped = host.replace("%", "\\%").replace("_", "\\_")
+            sql += " AND url LIKE ? ESCAPE '\\'"
+            params.append(f"%://{escaped}%")
+
+        sql += " ORDER BY tested_at DESC"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_untested_endpoints(
+        self,
+        hunt_id: str,
+        test_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return known endpoints that have no coverage row for given test types.
+
+        Discovers endpoints from urls and directories tables.
+        Returns list of {url, method, test_type} dicts.
+        """
+        if not test_types:
+            test_types = ["idor", "ssrf", "xss", "sqli", "auth"]
+
+        placeholders = ",".join("?" for _ in test_types)
+
+        # Collect known endpoint URLs from urls + directories tables
+        sql = f"""
+            SELECT ep.url, ep.method, tt.test_type
+            FROM (
+                SELECT url, method FROM urls WHERE hunt_id = ?
+                UNION
+                SELECT url, 'GET' as method FROM directories WHERE hunt_id = ?
+            ) ep
+            CROSS JOIN (
+                SELECT value AS test_type FROM json_each(json_array({placeholders}))
+            ) tt
+            LEFT JOIN coverage c
+                ON c.hunt_id = ?
+                AND c.url = ep.url
+                AND c.method = ep.method
+                AND c.test_type = tt.test_type
+            WHERE c.id IS NULL
+            ORDER BY ep.url, tt.test_type
+        """
+        params = [hunt_id, hunt_id] + test_types + [hunt_id]
+        rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ═══════════════════ V3: DEDUP GROUPS ═══════════════════
+
+    def insert_dedup_group(self, hunt_id: str, group: dict[str, Any]) -> int:
+        """Insert a dedup group. Returns the row ID."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO dedup_groups
+                (hunt_id, canonical_id, finding_ids, reason, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, canonical_id) DO UPDATE SET
+                finding_ids = excluded.finding_ids,
+                reason = excluded.reason""",
+            (
+                hunt_id,
+                group["canonical_id"],
+                json.dumps(group.get("finding_ids", [])),
+                group["reason"],
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_dedup_groups(self, hunt_id: str) -> list[dict[str, Any]]:
+        """List all dedup groups for a hunt."""
+        rows = self._conn.execute(
+            "SELECT * FROM dedup_groups WHERE hunt_id = ? ORDER BY created_at DESC",
+            (hunt_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["finding_ids"] = _parse_json_field(
+                r["finding_ids"], "[]", label="finding_ids", record_id=r.get("id", "?")
+            )
+            results.append(r)
+        return results
+
+    def delete_dedup_groups(self, hunt_id: str) -> int:
+        """Delete all dedup groups for a hunt. Returns rows deleted."""
+        cursor = self._conn.execute(
+            "DELETE FROM dedup_groups WHERE hunt_id = ?", (hunt_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def is_duplicate(self, hunt_id: str, finding_id: int) -> bool:
+        """Check if a finding is a non-canonical member of any dedup group."""
+        rows = self._conn.execute(
+            "SELECT finding_ids FROM dedup_groups WHERE hunt_id = ?", (hunt_id,)
+        ).fetchall()
+        for row in rows:
+            ids = _parse_json_field(row["finding_ids"], "[]", label="finding_ids", record_id="?")
+            canonical_row = self._conn.execute(
+                "SELECT canonical_id FROM dedup_groups WHERE hunt_id = ? AND finding_ids = ?",
+                (hunt_id, row["finding_ids"]),
+            ).fetchone()
+            canonical_id = canonical_row["canonical_id"] if canonical_row else None
+            if finding_id in ids and finding_id != canonical_id:
+                return True
+        return False
+
+    def get_canonical_finding(self, hunt_id: str, finding_id: int) -> dict[str, Any] | None:
+        """If finding is in a dedup group, return the canonical finding; else return itself."""
+        rows = self._conn.execute(
+            "SELECT canonical_id, finding_ids FROM dedup_groups WHERE hunt_id = ?",
+            (hunt_id,),
+        ).fetchall()
+        for row in rows:
+            ids = _parse_json_field(
+                row["finding_ids"], "[]", label="finding_ids", record_id="?"
+            )
+            if finding_id in ids:
+                canonical_id = row["canonical_id"]
+                return self._get_finding_by_id(canonical_id)
+        return self._get_finding_by_id(finding_id)
+
+    def _get_finding_by_id(self, finding_id: int) -> dict[str, Any] | None:
+        """Get a single finding by its primary key."""
+        row = self._conn.execute(
+            "SELECT * FROM findings WHERE id = ?", (finding_id,)
+        ).fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        fid = r.get("id", "?")
+        r["evidence"] = (
+            _parse_json_field(r["evidence"], "null", label="evidence", record_id=fid)
+            if r.get("evidence")
+            else None
+        )
+        r["request_ids"] = _parse_json_field(
+            r["request_ids"], "[]", label="request_ids", record_id=fid
+        )
+        r["tags"] = _parse_json_field(r["tags"], "[]", label="tags", record_id=fid)
+        r["confirmed"] = bool(r["confirmed"])
+        r["false_positive"] = bool(r["false_positive"])
+        r["reported"] = bool(r["reported"])
+        return r
+
+    # ═══════════════════ V3: CHAINS ═══════════════════
+
+    def upsert_chain(self, hunt_id: str, chain: dict[str, Any]) -> int:
+        """Insert or update an attack chain. Returns the row ID."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO chains
+                (hunt_id, title, description, severity, confidence,
+                 cvss_score, cvss_vector, finding_ids, chain_order,
+                 impact, prerequisites, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, title) DO UPDATE SET
+                description = excluded.description,
+                severity = excluded.severity,
+                confidence = excluded.confidence,
+                cvss_score = excluded.cvss_score,
+                cvss_vector = excluded.cvss_vector,
+                finding_ids = excluded.finding_ids,
+                chain_order = excluded.chain_order,
+                impact = excluded.impact,
+                prerequisites = excluded.prerequisites,
+                tags = excluded.tags,
+                updated_at = excluded.updated_at""",
+            (
+                hunt_id,
+                chain["title"],
+                chain.get("description"),
+                chain.get("severity", "info"),
+                chain.get("confidence", "hypothetical"),
+                chain.get("cvss_score"),
+                chain.get("cvss_vector"),
+                json.dumps(chain.get("finding_ids", [])),
+                json.dumps(chain.get("chain_order", [])),
+                chain.get("impact"),
+                json.dumps(chain.get("prerequisites", [])),
+                json.dumps(chain.get("tags", [])),
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_chains(
+        self, hunt_id: str, severity: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Query chains with optional severity filter."""
+        sql = "SELECT * FROM chains WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if severity:
+            sql += " AND severity = ?"
+            params.append(severity)
+        sql += " ORDER BY cvss_score DESC, created_at DESC"
+        rows = self._conn.execute(sql, params).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            cid = r.get("id", "?")
+            for field in ("finding_ids", "chain_order", "prerequisites", "tags"):
+                r[field] = _parse_json_field(r[field], "[]", label=field, record_id=cid)
+            results.append(r)
+        return results
+
+    def get_chain(self, chain_id: int) -> dict[str, Any] | None:
+        """Get a single chain by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM chains WHERE id = ?", (chain_id,)
+        ).fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        cid = r.get("id", "?")
+        for field in ("finding_ids", "chain_order", "prerequisites", "tags"):
+            r[field] = _parse_json_field(r[field], "[]", label=field, record_id=cid)
+        return r
+
+    def update_chain_confidence(self, chain_id: int, confidence: str) -> None:
+        """Update a chain's confidence status."""
+        self._conn.execute(
+            "UPDATE chains SET confidence = ?, updated_at = ? WHERE id = ?",
+            (confidence, _now(), chain_id),
+        )
+        self._conn.commit()
+
+    def delete_chains(self, hunt_id: str) -> int:
+        """Delete all chains for a hunt. Returns rows deleted."""
+        cursor = self._conn.execute(
+            "DELETE FROM chains WHERE hunt_id = ?", (hunt_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    # ═══════════════════ V3: REPORTS ═══════════════════
+
+    def upsert_report(self, hunt_id: str, report: dict[str, Any]) -> int:
+        """Insert or update a report. Returns the row ID."""
+        now = _now()
+        cursor = self._conn.execute(
+            """INSERT INTO reports
+                (hunt_id, finding_id, chain_id, title, severity,
+                 cvss_score, cvss_vector, summary, steps, impact,
+                 remediation, evidence_refs, request_ids,
+                 platform, platform_report_id, platform_status,
+                 submitted_at, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                hunt_id,
+                report.get("finding_id"),
+                report.get("chain_id"),
+                report["title"],
+                report["severity"],
+                report.get("cvss_score"),
+                report.get("cvss_vector"),
+                report.get("summary"),
+                json.dumps(report.get("steps", [])),
+                report.get("impact"),
+                report.get("remediation"),
+                json.dumps(report.get("evidence_refs", [])),
+                json.dumps(report.get("request_ids", [])),
+                report.get("platform"),
+                report.get("platform_report_id"),
+                report.get("platform_status"),
+                report.get("submitted_at"),
+                report.get("status", "draft"),
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_reports(
+        self,
+        hunt_id: str,
+        status: str | None = None,
+        platform: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query reports with optional filters."""
+        sql = "SELECT * FROM reports WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if platform:
+            sql += " AND platform = ?"
+            params.append(platform)
+        sql += " ORDER BY created_at DESC"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._deserialize_report_row(dict(r)) for r in rows]
+
+    def get_report(self, report_id: int) -> dict[str, Any] | None:
+        """Get a single report by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM reports WHERE id = ?", (report_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return self._deserialize_report_row(dict(row))
+
+    def _deserialize_report_row(self, r: dict[str, Any]) -> dict[str, Any]:
+        rid = r.get("id", "?")
+        for field in ("steps", "evidence_refs", "request_ids"):
+            r[field] = _parse_json_field(r[field], "[]", label=field, record_id=rid)
+        return r
+
+    def update_report_status(
+        self,
+        report_id: int,
+        status: str,
+        platform_report_id: str | None = None,
+        platform_status: str | None = None,
+    ) -> None:
+        """Update a report's status and optional platform fields."""
+        updates = ["status = ?", "updated_at = ?"]
+        params: list[Any] = [status, _now()]
+        if platform_report_id is not None:
+            updates.append("platform_report_id = ?")
+            params.append(platform_report_id)
+        if platform_status is not None:
+            updates.append("platform_status = ?")
+            params.append(platform_status)
+        params.append(report_id)
+        self._conn.execute(
+            f"UPDATE reports SET {', '.join(updates)} WHERE id = ?", params
+        )
+        self._conn.commit()

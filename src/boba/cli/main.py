@@ -950,6 +950,346 @@ def scan_nuclei(
             )
 
 
+# ═══════════════════ ANALYZE COMMANDS ═══════════════════
+
+analyze_app = typer.Typer(help="Analysis tools — coverage, dedup, severity, chaining.")
+app.add_typer(analyze_app, name="analyze")
+
+
+@analyze_app.command("coverage")
+def analyze_coverage_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    host: Annotated[Optional[str], typer.Option("--host", help="Filter by host")] = None,
+    untested_only: Annotated[bool, typer.Option("--untested-only", help="Show only untested endpoints")] = False,
+    test_type: Annotated[Optional[str], typer.Option("--test-type", "-t", help="Filter by test types (comma-separated)")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Show coverage summary or untested endpoints."""
+    with _managed(data_dir) as manager:
+        from boba.analysis.coverage import get_coverage_summary, get_coverage_gaps
+
+        test_types = [t.strip() for t in test_type.split(",")] if test_type else None
+
+        if untested_only:
+            gaps = get_coverage_gaps(manager.context, hunt_id, test_types=test_types, host=host)
+            format_output(
+                gaps,
+                fmt=fmt,
+                columns=["url", "method", "test_type"],
+                title="Untested Endpoints",
+            )
+        else:
+            from dataclasses import asdict
+
+            summary = get_coverage_summary(
+                manager.context, hunt_id, host=host, test_types=test_types,
+            )
+            if fmt == "json":
+                format_output(asdict(summary), fmt="json")
+            else:
+                from rich.table import Table
+
+                t = Table(title="Coverage Summary")
+                t.add_column("Metric")
+                t.add_column("Value", justify="right")
+                t.add_row("Total endpoints", str(summary.total_endpoints))
+                t.add_row("Tested", str(summary.tested_endpoints))
+                t.add_row("Untested", str(summary.untested_endpoints))
+                for tt, count in sorted(summary.coverage_by_test_type.items()):
+                    t.add_row(f"  {tt}", str(count))
+                t.add_row("Coverage gaps", str(len(summary.gaps)))
+                console.print(t)
+
+
+@analyze_app.command("dedupe")
+def analyze_dedupe_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show groups without persisting")] = False,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Deduplicate findings — group findings that share the same root cause."""
+    with _managed(data_dir) as manager:
+        from boba.analysis.dedup import deduplicate_findings
+        from dataclasses import asdict
+
+        groups = deduplicate_findings(manager.context, hunt_id, dry_run=dry_run)
+
+        if not groups:
+            print_info("No duplicate findings detected.")
+            return
+
+        if fmt == "json":
+            format_output([asdict(g) for g in groups], fmt="json")
+        else:
+            from rich.table import Table
+
+            t = Table(title=f"Dedup Groups{' (dry run)' if dry_run else ''}")
+            t.add_column("Group ID")
+            t.add_column("Canonical")
+            t.add_column("Members")
+            t.add_column("Reason")
+            for g in groups:
+                t.add_row(
+                    str(g.id),
+                    str(g.canonical_id),
+                    ", ".join(str(fid) for fid in g.finding_ids),
+                    g.reason,
+                )
+            console.print(t)
+            print_info(f"{len(groups)} group(s) found, {sum(len(g.finding_ids) for g in groups)} findings grouped.")
+
+
+@analyze_app.command("severity")
+def analyze_severity_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    finding_id: Annotated[Optional[int], typer.Option("--finding-id", help="Score a single finding")] = None,
+    platform: Annotated[Optional[str], typer.Option("--platform", help="Include payout estimates (hackerone, bugcrowd)")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Score findings with CVSS 3.1 and estimate payouts."""
+    with _managed(data_dir) as manager:
+        from boba.analysis.severity import score_findings
+
+        ids = [finding_id] if finding_id else None
+        scored = score_findings(manager.context, hunt_id, finding_ids=ids, platform=platform)
+
+        if not scored:
+            print_info("No findings to score.")
+            return
+
+        columns = ["finding_id", "title", "finding_type", "cvss_score", "cvss_severity", "cvss_vector"]
+        if platform:
+            columns.extend(["payout_min", "payout_max"])
+
+        format_output(scored, fmt=fmt, columns=columns, title="Severity Assessment")
+
+
+@analyze_app.command("chain")
+def analyze_chain_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    finding_ids: Annotated[Optional[str], typer.Option("--finding-ids", help="Suggest chains for specific finding IDs (comma-separated)")] = None,
+    validate: Annotated[Optional[int], typer.Option("--validate", help="Mark a chain ID as validated")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Detect or suggest vulnerability chains."""
+    with _managed(data_dir) as manager:
+        from dataclasses import asdict
+
+        if validate is not None:
+            from boba.analysis.chaining import validate_chain
+
+            chain = validate_chain(manager.context, hunt_id, validate)
+            if chain:
+                print_success(f"Chain {validate} marked as validated.")
+                format_output(asdict(chain), fmt=fmt, title="Validated Chain")
+            else:
+                print_error(f"Chain {validate} not found.")
+                raise typer.Exit(1)
+            return
+
+        if finding_ids:
+            from boba.analysis.chaining import suggest_chains
+
+            ids = [int(x.strip()) for x in finding_ids.split(",")]
+            chains = suggest_chains(manager.context, hunt_id, ids)
+        else:
+            from boba.analysis.chaining import detect_chains
+
+            chains = detect_chains(manager.context, hunt_id)
+
+        if not chains:
+            print_info("No chains detected.")
+            return
+
+        if fmt == "json":
+            format_output([asdict(c) for c in chains], fmt="json")
+        else:
+            from rich.table import Table
+
+            t = Table(title="Attack Chains")
+            t.add_column("ID")
+            t.add_column("Severity")
+            t.add_column("CVSS")
+            t.add_column("Title")
+            t.add_column("Findings")
+            t.add_column("Confidence")
+            for c in chains:
+                t.add_row(
+                    str(c.id),
+                    c.severity.value,
+                    f"{c.cvss_score:.1f}",
+                    c.title,
+                    ", ".join(str(fid) for fid in c.finding_ids),
+                    c.confidence.value,
+                )
+            console.print(t)
+
+
+@analyze_app.command("prioritize")
+def analyze_prioritize_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    top: Annotated[Optional[int], typer.Option("--top", help="Show only top N endpoints")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Rank untested endpoints by vulnerability likelihood."""
+    with _managed(data_dir) as manager:
+        from boba.analysis.prioritize import prioritize_endpoints
+
+        results = prioritize_endpoints(manager.context, hunt_id, top=top)
+
+        if not results:
+            print_info("No untested endpoints to prioritize.")
+            return
+
+        format_output(
+            results,
+            fmt=fmt,
+            columns=["priority_score", "url", "method", "suggested_tests", "reasons"],
+            title="Prioritized Endpoints",
+        )
+
+
+# ═══════════════════ REPORT COMMANDS ═══════════════════
+
+report_app = typer.Typer(help="Report generation and management.")
+app.add_typer(report_app, name="report")
+
+
+@report_app.command("draft")
+def report_draft_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    finding_id: Annotated[Optional[int], typer.Option("--finding-id", help="Finding ID")] = None,
+    chain_id: Annotated[Optional[int], typer.Option("--chain-id", help="Chain ID")] = None,
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Generate a report draft from a finding or chain."""
+    if not finding_id and not chain_id:
+        print_error("Provide --finding-id or --chain-id")
+        raise typer.Exit(1)
+
+    with _managed(data_dir) as manager:
+        from boba.reporting.draft import draft_finding_report, draft_chain_report
+        from dataclasses import asdict
+
+        if finding_id:
+            draft = draft_finding_report(manager.context, hunt_id, finding_id)
+        else:
+            draft = draft_chain_report(manager.context, hunt_id, chain_id)
+
+        format_output(asdict(draft), fmt=fmt, title="Report Draft")
+
+
+@report_app.command("format")
+def report_format_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    report_id: Annotated[int, typer.Option("--report-id", "-r", help="Report ID")],
+    platform: Annotated[str, typer.Option("--platform", "-p", help="Platform: hackerone, bugcrowd, markdown")] = "markdown",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Format a report for a specific platform."""
+    with _managed(data_dir) as manager:
+        from boba.reporting.formatter import format_hackerone, format_bugcrowd, format_markdown
+        from boba.core.models import ReportDraft, Severity, ReportStatus
+
+        report_data = manager.context.get_report(report_id)
+        if not report_data:
+            print_error(f"Report {report_id} not found")
+            raise typer.Exit(1)
+
+        # Reconstruct ReportDraft from DB data
+        draft = ReportDraft(
+            id=report_data["id"],
+            hunt_id=report_data["hunt_id"],
+            finding_id=report_data.get("finding_id"),
+            chain_id=report_data.get("chain_id"),
+            title=report_data["title"],
+            severity=Severity(report_data.get("severity", "info")),
+            cvss_score=report_data.get("cvss_score") or 0.0,
+            cvss_vector=report_data.get("cvss_vector") or "",
+            summary=report_data.get("summary") or "",
+            steps=report_data.get("steps", []),
+            impact=report_data.get("impact") or "",
+            remediation=report_data.get("remediation") or "",
+            evidence_refs=report_data.get("evidence_refs", []),
+            request_ids=report_data.get("request_ids", []),
+            status=ReportStatus(report_data.get("status", "draft")),
+        )
+
+        formatters = {
+            "hackerone": format_hackerone,
+            "bugcrowd": format_bugcrowd,
+            "markdown": format_markdown,
+        }
+        formatter = formatters.get(platform, format_markdown)
+        console.print(formatter(draft))
+
+
+@report_app.command("poc")
+def report_poc_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    finding_id: Annotated[Optional[int], typer.Option("--finding-id", help="Finding ID")] = None,
+    chain_id: Annotated[Optional[int], typer.Option("--chain-id", help="Chain ID")] = None,
+    output_dir: Annotated[str, typer.Option("--output-dir", "-o", help="Output directory")] = "./poc",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Package PoC evidence into a directory."""
+    if not finding_id and not chain_id:
+        print_error("Provide --finding-id or --chain-id")
+        raise typer.Exit(1)
+
+    with _managed(data_dir) as manager:
+        from boba.reporting.poc import package_poc
+
+        pkg = package_poc(
+            manager.context, hunt_id,
+            finding_id=finding_id, chain_id=chain_id,
+            output_dir=output_dir,
+        )
+        print_success(
+            f"PoC packaged: {len(pkg.http_dumps)} HTTP dump(s), output: {pkg.output_dir}"
+        )
+
+
+@report_app.command("list")
+def report_list_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    status: Annotated[Optional[str], typer.Option("--status", help="Filter by status")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """List all reports for a hunt."""
+    with _managed(data_dir) as manager:
+        reports = manager.context.get_reports(hunt_id, status=status)
+        format_output(
+            reports,
+            fmt=fmt,
+            columns=["id", "title", "severity", "status", "platform", "cvss_score"],
+            title="Reports",
+        )
+
+
+@report_app.command("show")
+def report_show_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    report_id: Annotated[int, typer.Option("--report-id", "-r", help="Report ID")],
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Show a full report."""
+    with _managed(data_dir) as manager:
+        report = manager.context.get_report(report_id)
+        if not report:
+            print_error(f"Report {report_id} not found")
+            raise typer.Exit(1)
+        format_output(report, fmt=fmt, title="Report")
+
+
 # ═══════════════════ TEST COMMANDS ═══════════════════
 
 test_app = typer.Typer(help="Vulnerability testing tools.")
@@ -1072,6 +1412,134 @@ def test_auth_cmd(
 
         result = asyncio.run(vuln.test_auth(client, endpoint, jwt_token=jwt))
         format_output(asdict(result), fmt=fmt, title="Auth Test Result")
+
+
+@test_app.command("race")
+def test_race_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "POST",
+    body: Annotated[Optional[str], typer.Option("--body", "-b", help="Request body")] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency", "-c", help="Concurrent requests")] = 10,
+    session_name: Annotated[str, typer.Option("--session", "-s", help="Session name")] = "",
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test for race conditions."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from boba.core.models import SessionState
+        from dataclasses import asdict
+
+        sess = SessionState(name=session_name or "default", target_url=url)
+        if session_name:
+            sess_mgr = _get_session_manager(manager, hunt_id)
+            s = sess_mgr.get(session_name)
+            if s:
+                sess = s
+
+        result = asyncio.run(vuln.test_race(client, sess, url, method, body, concurrency))
+        format_output(asdict(result), fmt=fmt, title="Race Condition Test Result")
+
+
+@test_app.command("redirect")
+def test_redirect_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    param: Annotated[str, typer.Option("--param", "-p", help="Parameter name")] = "next",
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test for open redirect."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from dataclasses import asdict
+
+        result = asyncio.run(vuln.test_redirect(client, url, param))
+        format_output(asdict(result), fmt=fmt, title="Redirect Test Result")
+
+
+@test_app.command("csrf")
+def test_csrf_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    session_name: Annotated[str, typer.Option("--session", "-s", help="Session name")],
+    method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "POST",
+    body: Annotated[Optional[str], typer.Option("--body", "-b", help="Request body")] = None,
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test for Cross-Site Request Forgery."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from dataclasses import asdict
+
+        sess_mgr = _get_session_manager(manager, hunt_id)
+        sess = sess_mgr.get(session_name)
+        if not sess:
+            print_error(f"Session '{session_name}' not found")
+            raise typer.Exit(1)
+
+        result = asyncio.run(vuln.test_csrf(client, sess, url, method, body))
+        format_output(asdict(result), fmt=fmt, title="CSRF Test Result")
+
+
+@test_app.command("mass-assign")
+def test_mass_assign_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    session_name: Annotated[str, typer.Option("--session", "-s", help="Session name")],
+    method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "PUT",
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test for mass assignment."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from dataclasses import asdict
+
+        sess_mgr = _get_session_manager(manager, hunt_id)
+        sess = sess_mgr.get(session_name)
+        if not sess:
+            print_error(f"Session '{session_name}' not found")
+            raise typer.Exit(1)
+
+        result = asyncio.run(vuln.test_mass_assign(client, sess, url, method))
+        format_output(asdict(result), fmt=fmt, title="Mass Assignment Test Result")
+
+
+@test_app.command("reset")
+def test_reset_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Reset endpoint URL")],
+    email_param: Annotated[str, typer.Option("--email-param", help="Email parameter name")] = "email",
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test password reset flow."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from dataclasses import asdict
+
+        result = asyncio.run(vuln.test_reset(client, url, email_param))
+        format_output(asdict(result), fmt=fmt, title="Password Reset Test Result")
+
+
+@test_app.command("ai")
+def test_ai_cmd(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    param: Annotated[str, typer.Option("--param", "-p", help="Parameter name")] = "message",
+    fmt: FormatOption = "json",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Test for AI/LLM prompt injection."""
+    with _managed_http(data_dir, hunt_id) as (manager, client):
+        from boba.tools import vuln
+        from dataclasses import asdict
+
+        result = asyncio.run(vuln.test_ai(client, url, param))
+        format_output(asdict(result), fmt=fmt, title="AI Prompt Injection Test Result")
 
 
 # ═══════════════════ CONTEXT EXTENSIONS ═══════════════════

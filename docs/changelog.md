@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.0](#030--intelligence-analysis-chaining--reporting) — V3: analysis engine (coverage, dedup, CVSS, chaining, prioritization), reporting pipeline (draft, format, PoC), 6 new vuln tools (race, redirect, CSRF, mass assignment, reset, AI prompt injection). 4 new tables, 2 new packages, 133 new tests (579 total)
 - [0.2.21](#0221--nuclei-collision--login-deepcopy--idor-empty-body--sqli-confirm) — Nuclei finding collision fix (template_id as unique key), session `login_*()` deep-copy consistency, IDOR empty-body false negative, Nuclei scope mode to "both", hunt_create JSON scope_rules, SQLi time-based confirmation, HuntManager context manager. 8 fixes + 12 new tests (446 total)
 - [0.2.20](#0220--evidence-merge--session-create-deepcopy--fuzz-warnings) — Finding upsert evidence/request_ids merge (was overwrite), `session.create()` deep-copy consistency, fuzz BATTERING_RAM/PITCHFORK missing-payload warnings. 3 fixes + 5 new tests (434 total)
 - [0.2.19](#0219--scope-bypass-fuzz-baseline--session-cache-safety) — URL prefix cross-domain scope bypass, fuzz baseline marker stripping, `list_sessions()` deep-copy consistency, browser body size cap, CLI http-history JSON data preservation. 5 fixes + 8 new tests (429 total)
@@ -23,6 +24,149 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.0 — Intelligence: Analysis, Chaining & Reporting
+
+**Date:** 2026-04-02
+**Scope:** 2 new packages, ~2,500 lines of new code, 579 tests passing (133 new, 0 regressions)
+
+V3 gives agents the ability to assess what they found and communicate it — the intelligence layer that transforms raw vulnerability data into scored, deduplicated, chained findings with platform-ready reports. After V3, the agent's workflow is: discover → test → analyze → score → chain → report → human submits.
+
+### Analysis Engine (`analysis/`)
+
+New package with 5 modules that consume V1/V2 data and produce higher-order intelligence. All analysis modules are read-only against V1/V2 tables — they write only to their own V3 tables.
+
+- **Coverage tracking** (`analysis/coverage.py`) — answers "what have I tested?" and "what should I test next?" Auto-recorded as a side effect of every `test_*` function (no manual logging needed). Cross-joins known endpoints (urls + directories) × test types to compute untested gaps. Summary aggregation for agent reasoning.
+
+- **Finding deduplication** (`analysis/dedup.py`) — detects when multiple tools/tests found the same underlying vulnerability. Uses a union-find algorithm with three signals: (1) exact URL + parameter cross-type match, (2) typed URL + parameter match, (3) same host + parameter + vuln class. Selects a canonical (best) finding per group: confirmed > severity > evidence count > recency. Idempotent — safe to re-run after new findings arrive.
+
+- **CVSS 3.1 severity scoring** (`analysis/severity.py`) — exact implementation of the CVSS 3.1 base score formula per FIRST specification. Auto-scoring heuristics map finding types to CVSS metrics (e.g., SSRF → AV:N/S:C/C:H, XSS stored → AC:L vs reflected → AC:H). Evidence-based refinements (cloud metadata SSRF upgrades to C:H/I:H, write IDOR upgrades I to H). Platform payout mapping for HackerOne and Bugcrowd tiers. Scoring is read-only — never mutates findings.
+
+- **Vulnerability chaining** (`analysis/chaining.py`) — 8 rules-based chain patterns that correlate findings into higher-severity attack chains. Multi-finding chains (redirect + SSRF → internal access, IDOR + SQLi → authenticated data extraction, XSS + CSRF → account takeover). Single-finding evidence-upgrade chains (SSRF + cloud metadata → credential theft, auth bypass + admin evidence → full admin access). Dedup-aware — excludes non-canonical findings. Three-tier confidence: hypothetical → partial → validated.
+
+- **Attack path prioritization** (`analysis/prioritize.py`) — ranks untested endpoints by vulnerability likelihood. Additive scoring: query parameters (+3), auth-related paths (+3), proxy/redirect paths (+3), admin paths (+2.5), API endpoints (+2), hot hosts with existing findings (+2). Suggests which test types to run per endpoint. Already-tested endpoints (with coverage rows) excluded.
+
+### Reporting Pipeline (`reporting/`)
+
+New package with 3 modules — draft → format → package.
+
+- **Report drafting** (`reporting/draft.py`) — `draft_finding_report()` and `draft_chain_report()` generate structured `ReportDraft` objects from finding/chain records. Auto-generates: title (`[Component] — [Vuln Type] via [Param] Leads to [Impact]`), summary, reproduction steps (from evidence + HTTP history), impact statement (concrete, not hypothetical), and type-specific remediation. Persists to reports table.
+
+- **Platform formatting** (`reporting/formatter.py`) — `format_hackerone()`, `format_bugcrowd()`, `format_markdown()`. Each produces copy-paste-ready markdown:
+  - HackerOne: Summary, Steps to Reproduce, Impact, Remediation, Supporting Material sections with CVSS vector
+  - Bugcrowd: VRT classification (P1–P5), Description, Steps, Impact, Severity Justification sections
+  - Generic markdown: clean heading structure for self-hosted programs, email, or Jira
+
+- **PoC packaging** (`reporting/poc.py`) — `package_poc()` compiles evidence into a directory: `requests/*.http` files (RFC 7230 format, importable into Burp/Postman), `evidence.json` (structured evidence array), `README.md` (summary with reproduction steps and file manifest).
+
+### Advanced Vulnerability Tools (6 new test types)
+
+Extends `tools/vuln.py` with 6 new test functions. All auto-record coverage. Brings total vuln test types from 5 to 11.
+
+| Tool | Detection Method | Severity |
+|---|---|---|
+| `test_race()` | Fire N concurrent requests via `asyncio.gather`, detect divergent status codes / response bodies / multiple successes on one-time actions | High |
+| `test_redirect()` | Inject redirect payloads (direct, protocol-relative, backslash, encoded, subdomain confusion), check Location header for external host redirect | Medium |
+| `test_csrf()` | Three-signal detection: request without token accepted, invalid token accepted, cross-origin headers accepted. Two signals = confirmed | Medium |
+| `test_mass_assign()` | Send extra JSON fields (isAdmin, role, verified, balance, plan), re-fetch to verify persistence. Before/after comparison eliminates false positives | High |
+| `test_reset()` | Host header injection (check if attack host reflected in reset link), rate limiting check (5 rapid requests) | High |
+| `test_ai()` | Prompt injection via canary markers (instruction override) and leak indicator counting (system prompt exfiltration, ≥3 indicators required) | High |
+
+### New Payloads
+
+- `payloads/redirect.py` — 15 open redirect payloads across 5 categories (direct, protocol-relative, backslash, encoded, subdomain confusion)
+- `payloads/csrf.py` — CSRF token parameter names, protection headers, cross-origin test headers
+- `payloads/ai.py` — 10 prompt injection payloads (5 exfiltration, 5 override), canary markers, leak indicators
+
+### Schema Extensions
+
+4 new tables, all with appropriate indexes and foreign key constraints:
+
+```sql
+-- Coverage: what's been tested (auto-recorded by vuln tools)
+coverage (hunt_id, url, method, parameter, test_type, tested_at, tool_run_id, finding_id)
+  UNIQUE(hunt_id, url, method, parameter, test_type)
+
+-- Dedup groups: findings representing the same vulnerability
+dedup_groups (hunt_id, canonical_id → findings.id, finding_ids JSON, reason)
+  UNIQUE(hunt_id, canonical_id)
+
+-- Attack chains: correlated findings with combined severity
+chains (hunt_id, title, severity, confidence, cvss_score, cvss_vector,
+        finding_ids JSON, chain_order JSON, impact, prerequisites JSON)
+  UNIQUE(hunt_id, title)
+
+-- Reports: generated vulnerability reports with platform tracking
+reports (hunt_id, finding_id, chain_id, title, severity, cvss_score, cvss_vector,
+         summary, steps JSON, impact, remediation, evidence_refs JSON, request_ids JSON,
+         platform, platform_report_id, platform_status, status)
+```
+
+Context methods added: `upsert_coverage`, `get_coverage`, `get_untested_endpoints`, `insert_dedup_group`, `get_dedup_groups`, `delete_dedup_groups`, `is_duplicate`, `get_canonical_finding`, `_get_finding_by_id`, `upsert_chain`, `get_chains`, `get_chain`, `update_chain_confidence`, `delete_chains`, `upsert_report`, `get_reports`, `get_report`, `update_report_status`.
+
+### New Data Models
+
+- `CoverageEntry`, `CoverageSummary` — coverage tracking dataclasses
+- `DedupeGroup` — grouped duplicate findings
+- `CVSSScore` — CVSS 3.1 score with all 8 metrics + vector string
+- `ChainStatus` enum (hypothetical, validated, partial)
+- `AttackChain` — correlated finding chain with CVSS and impact
+- `ReportStatus` enum (draft, ready, submitted, accepted, rejected)
+- `Platform` enum (hackerone, bugcrowd, generic)
+- `ReportDraft` — structured vulnerability report
+- `PoCPackage` — evidence package metadata
+
+### New Error Types
+
+- `AnalysisError` — dedup, chaining, or scoring failure
+- `ReportError` — report generation or formatting failure
+
+### CLI
+
+2 new command groups + 6 new test commands:
+
+```
+boba analyze  {coverage, dedupe, severity, chain, prioritize}
+boba report   {draft, format, poc, list, show}
+boba test     {race, redirect, csrf, mass-assign, reset, ai}  (new)
+```
+
+Key flags:
+- `analyze coverage --untested-only --test-type idor,xss --host app.example.com`
+- `analyze dedupe --dry-run`
+- `analyze severity --finding-id 7 --platform hackerone`
+- `analyze chain --finding-ids 3,7,12` / `--validate 1`
+- `analyze prioritize --top 10`
+- `report draft --finding-id 7` / `--chain-id 1`
+- `report format --report-id 1 --platform hackerone`
+- `report poc --finding-id 7 --output-dir ./evidence`
+
+### Test Coverage (133 new tests)
+
+| Area | Tests | What's Covered |
+|---|---|---|
+| Coverage context + analysis | 19 | CRUD, unique constraints, host/type filters, untested gaps, auto-recording from vuln tools, summary aggregation, CLI |
+| Dedup context + engine | 20 | Grouping (exact URL, same host, cross-type), canonical selection (confirmed/severity/evidence), idempotent, dry run, inline check, CLI |
+| CVSS + severity | 26 | Known vectors (Log4Shell 10.0, reflected XSS 6.1), boundaries, scope changed vs unchanged, auto-scoring all vuln types, payout mapping, batch scoring, CLI |
+| Chaining + prioritize | 29 | SSRF cloud chain, auth admin, IDOR+SQLi same host, evidence requirements, dedup exclusion, severity ≥ max, idempotent, suggest/validate, endpoint scoring (params, auth, hot host, proxy, admin), CLI |
+| Reporting (draft, format, PoC) | 23 | Draft structure, title format, evidence in steps, chain merges, persistence, HackerOne/Bugcrowd/markdown sections, VRT classification, PoC directory structure, HTTP dump format, CLI |
+| Advanced vuln tools | 16 | Race divergent/identical, redirect external/same-host, CSRF token/no-token, mass assign persist/reject, reset host injection/rate limit, AI canary/leak/clean |
+
+### Vuln Tool Auto-Coverage Integration
+
+All 11 `test_*` functions (5 from V2 + 6 new) now accept optional `context` and `hunt_id` parameters. When provided, they call `_record_coverage()` after testing — coverage tracking is automatic, not manual. Backwards compatible: callers that don't pass `context` get identical behavior to V2.
+
+### Design Decisions
+
+1. **Analysis reads V1/V2, writes V3.** Analysis modules never mutate reconnaissance or interaction tables. They read from `urls`, `directories`, `findings`, `http_history` and write only to `coverage`, `dedup_groups`, `chains`, `reports`. This clean data-flow boundary prevents V3 from breaking existing functionality.
+
+2. **CVSS scoring is read-only.** `score_findings()` returns enriched dicts but never writes back to the findings table. The original finding severity is preserved as `original_severity` alongside the computed `cvss_severity`. This makes scoring idempotent and non-destructive.
+
+3. **Chaining is rules-based, not ML-based.** Transparency is critical for agent reasoning — the agent needs to explain *why* a chain was detected in the report. 8 explicit chain rules with named patterns and evidence requirements provide auditable, explainable chains.
+
+4. **Platform API integration intentionally skipped.** Report formatting produces copy-paste-ready output for manual submission. Auto-submission is the highest-risk action in the pipeline (irreversible, externally visible). The human retains control over this step as a deliberate progressive-autonomy checkpoint.
 
 ---
 

@@ -255,3 +255,136 @@ class VulnTestResult:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     request_ids: list[int] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
+
+
+# ──────────────────────────── V3: Analysis ───────────────────────────
+
+
+@dataclass
+class CoverageEntry:
+    """One endpoint × one test type = one coverage row."""
+
+    url: str
+    method: str = "GET"
+    parameter: str = ""
+    test_type: str = ""
+    tested_at: str = ""
+    tool_run_id: int | None = None
+    finding_id: int | None = None
+    notes: str = ""
+
+
+@dataclass
+class CoverageSummary:
+    """Aggregated coverage stats for agent reasoning."""
+
+    total_endpoints: int = 0
+    tested_endpoints: int = 0
+    untested_endpoints: int = 0
+    coverage_by_test_type: dict[str, int] = field(default_factory=dict)
+    gaps: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class DedupeGroup:
+    """A group of findings that represent the same underlying vulnerability."""
+
+    id: int = 0
+    hunt_id: str = ""
+    canonical_id: int = 0
+    finding_ids: list[int] = field(default_factory=list)
+    reason: str = ""
+
+
+@dataclass
+class CVSSScore:
+    """CVSS 3.1 score with vector breakdown."""
+
+    score: float = 0.0
+    vector: str = ""
+    severity: Severity = Severity.INFO
+    attack_vector: str = "N"
+    attack_complexity: str = "L"
+    privileges_required: str = "N"
+    user_interaction: str = "N"
+    scope: str = "U"
+    confidentiality: str = "N"
+    integrity: str = "N"
+    availability: str = "N"
+
+
+class ChainStatus(str, Enum):
+    HYPOTHETICAL = "hypothetical"
+    VALIDATED = "validated"
+    PARTIAL = "partial"
+
+
+@dataclass
+class AttackChain:
+    """A chain of vulnerabilities that combine into higher-severity impact."""
+
+    id: int = 0
+    hunt_id: str = ""
+    title: str = ""
+    description: str = ""
+    severity: Severity = Severity.INFO
+    confidence: ChainStatus = ChainStatus.HYPOTHETICAL
+    cvss_score: float = 0.0
+    cvss_vector: str = ""
+    finding_ids: list[int] = field(default_factory=list)
+    chain_order: list[int] = field(default_factory=list)
+    impact: str = ""
+    prerequisites: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+
+
+# ──────────────────────────── V3: Reporting ──────────────────────────
+
+
+class ReportStatus(str, Enum):
+    DRAFT = "draft"
+    READY = "ready"
+    SUBMITTED = "submitted"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class Platform(str, Enum):
+    HACKERONE = "hackerone"
+    BUGCROWD = "bugcrowd"
+    GENERIC = "generic"
+
+
+@dataclass
+class ReportDraft:
+    """A structured vulnerability report ready for platform submission."""
+
+    id: int = 0
+    hunt_id: str = ""
+    finding_id: int | None = None
+    chain_id: int | None = None
+    title: str = ""
+    severity: Severity = Severity.INFO
+    cvss_score: float = 0.0
+    cvss_vector: str = ""
+    summary: str = ""
+    steps: list[str] = field(default_factory=list)
+    impact: str = ""
+    remediation: str = ""
+    evidence_refs: list[str] = field(default_factory=list)
+    request_ids: list[int] = field(default_factory=list)
+    platform: Platform = Platform.GENERIC
+    platform_report_id: str = ""
+    platform_status: str = ""
+    status: ReportStatus = ReportStatus.DRAFT
+
+
+@dataclass
+class PoCPackage:
+    """Evidence package for a single finding or chain."""
+
+    finding_id: int | None = None
+    chain_id: int | None = None
+    screenshots: list[str] = field(default_factory=list)
+    http_dumps: list[dict[str, Any]] = field(default_factory=list)
+    output_dir: str = ""
