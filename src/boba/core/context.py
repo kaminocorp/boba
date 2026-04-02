@@ -37,6 +37,30 @@ def _parse_json_field(
         return json.loads(default)
 
 
+def _json_array_merge(a: str | None, b: str | None) -> str:
+    """Merge two JSON arrays safely. Registered as a SQLite custom function.
+
+    Handles all edge cases: null, 'null', '[]', non-array JSON, malformed JSON.
+    Always returns a valid JSON array string.
+    """
+
+    def _parse_array(val: str | None) -> list:
+        if not val or val in ("null", "[]"):
+            return []
+        try:
+            parsed = json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if isinstance(parsed, list):
+            return parsed
+        return [parsed]
+
+    arr_a = _parse_array(a)
+    arr_b = _parse_array(b)
+    merged = arr_a + arr_b
+    return json.dumps(merged) if merged else "[]"
+
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS hunts (
     id          TEXT PRIMARY KEY,
@@ -249,6 +273,7 @@ CREATE TABLE IF NOT EXISTS findings (
     url              TEXT,
     endpoint         TEXT,
     parameter        TEXT NOT NULL DEFAULT '',
+    method           TEXT NOT NULL DEFAULT '',
     evidence         TEXT,
     request_ids      TEXT DEFAULT '[]',
     tool_run_id      INTEGER REFERENCES tool_runs(id),
@@ -259,7 +284,7 @@ CREATE TABLE IF NOT EXISTS findings (
     tags             TEXT DEFAULT '[]',
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
-    UNIQUE(hunt_id, finding_type, url, parameter)
+    UNIQUE(hunt_id, finding_type, url, method, parameter)
 );
 
 CREATE INDEX IF NOT EXISTS idx_findings_hunt     ON findings(hunt_id);
@@ -370,13 +395,21 @@ CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 
 
 class HuntContext:
-    """SQLite-backed persistence for all hunt data."""
+    """SQLite-backed persistence for all hunt data.
+
+    **Thread safety**: HuntContext is NOT thread-safe. It wraps a single
+    ``sqlite3.Connection`` (which defaults to ``check_same_thread=True``).
+    Each thread must use its own HuntContext instance.
+    """
 
     def __init__(self, db_path: str):
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._in_transaction = False
+
+        # Register custom SQL functions
+        self._conn.create_function("json_array_merge", 2, _json_array_merge, deterministic=True)
 
         result = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
         if result[0].upper() != "WAL":
@@ -388,9 +421,57 @@ class HuntContext:
             logger.warning("Failed to enable foreign_keys")
 
         self._create_tables()
+        self._maybe_migrate()
 
     def _create_tables(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
+
+    def _maybe_migrate(self) -> None:
+        """Apply schema migrations for existing databases."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(findings)").fetchall()}
+        if "method" not in columns:
+            logger.info("Migrating findings table: adding 'method' column + updated UNIQUE")
+            self._conn.executescript("""
+                ALTER TABLE findings RENAME TO _findings_old;
+
+                CREATE TABLE findings (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+                    finding_type     TEXT NOT NULL,
+                    severity         TEXT NOT NULL DEFAULT 'info',
+                    title            TEXT NOT NULL,
+                    description      TEXT,
+                    url              TEXT,
+                    endpoint         TEXT,
+                    parameter        TEXT NOT NULL DEFAULT '',
+                    method           TEXT NOT NULL DEFAULT '',
+                    evidence         TEXT,
+                    request_ids      TEXT DEFAULT '[]',
+                    tool_run_id      INTEGER REFERENCES tool_runs(id),
+                    confirmed        INTEGER DEFAULT 0,
+                    false_positive   INTEGER DEFAULT 0,
+                    reported         INTEGER DEFAULT 0,
+                    template_id      TEXT,
+                    tags             TEXT DEFAULT '[]',
+                    created_at       TEXT NOT NULL,
+                    updated_at       TEXT NOT NULL,
+                    UNIQUE(hunt_id, finding_type, url, method, parameter)
+                );
+
+                INSERT INTO findings
+                    (id, hunt_id, finding_type, severity, title, description,
+                     url, endpoint, parameter, method, evidence, request_ids,
+                     tool_run_id, confirmed, false_positive, reported,
+                     template_id, tags, created_at, updated_at)
+                SELECT
+                    id, hunt_id, finding_type, severity, title, description,
+                    url, endpoint, parameter, '', evidence, request_ids,
+                    tool_run_id, confirmed, false_positive, reported,
+                    template_id, tags, created_at, updated_at
+                FROM _findings_old;
+
+                DROP TABLE _findings_old;
+            """)
 
     def _maybe_commit(self) -> None:
         """Commit unless inside a batch transaction (upsert_records)."""
@@ -1092,36 +1173,16 @@ class HuntContext:
         cursor = self._conn.execute(
             """INSERT INTO findings
                 (hunt_id, finding_type, severity, title, description,
-                 url, endpoint, parameter, evidence, request_ids,
+                 url, endpoint, parameter, method, evidence, request_ids,
                  tool_run_id, confirmed, false_positive, reported,
                  template_id, tags, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(hunt_id, finding_type, url, parameter) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, finding_type, url, method, parameter) DO UPDATE SET
                 severity = excluded.severity,
                 title = excluded.title,
                 description = excluded.description,
-                evidence = CASE
-                    WHEN findings.evidence IS NULL
-                        OR findings.evidence IN ('null', '[]')
-                        THEN excluded.evidence
-                    WHEN excluded.evidence IS NULL
-                        OR excluded.evidence IN ('null', '[]')
-                        THEN findings.evidence
-                    ELSE substr(findings.evidence, 1,
-                                length(findings.evidence) - 1)
-                         || ',' || substr(excluded.evidence, 2)
-                END,
-                request_ids = CASE
-                    WHEN findings.request_ids IS NULL
-                        OR findings.request_ids IN ('null', '[]')
-                        THEN excluded.request_ids
-                    WHEN excluded.request_ids IS NULL
-                        OR excluded.request_ids IN ('null', '[]')
-                        THEN findings.request_ids
-                    ELSE substr(findings.request_ids, 1,
-                                length(findings.request_ids) - 1)
-                         || ',' || substr(excluded.request_ids, 2)
-                END,
+                evidence = json_array_merge(findings.evidence, excluded.evidence),
+                request_ids = json_array_merge(findings.request_ids, excluded.request_ids),
                 tool_run_id = excluded.tool_run_id,
                 confirmed = MAX(findings.confirmed, excluded.confirmed),
                 false_positive = MAX(findings.false_positive, excluded.false_positive),
@@ -1138,6 +1199,7 @@ class HuntContext:
                 finding.get("url") or "",
                 finding.get("endpoint"),
                 finding.get("parameter") or "",
+                finding.get("method") or "",
                 json.dumps(
                     finding["evidence"]
                     if isinstance(finding.get("evidence"), list)
@@ -1389,9 +1451,7 @@ class HuntContext:
 
     def delete_dedup_groups(self, hunt_id: str) -> int:
         """Delete all dedup groups for a hunt. Returns rows deleted."""
-        cursor = self._conn.execute(
-            "DELETE FROM dedup_groups WHERE hunt_id = ?", (hunt_id,)
-        )
+        cursor = self._conn.execute("DELETE FROM dedup_groups WHERE hunt_id = ?", (hunt_id,))
         self._conn.commit()
         return cursor.rowcount
 
@@ -1418,9 +1478,7 @@ class HuntContext:
             (hunt_id,),
         ).fetchall()
         for row in rows:
-            ids = _parse_json_field(
-                row["finding_ids"], "[]", label="finding_ids", record_id="?"
-            )
+            ids = _parse_json_field(row["finding_ids"], "[]", label="finding_ids", record_id="?")
             if finding_id in ids:
                 canonical_id = row["canonical_id"]
                 return self._get_finding_by_id(canonical_id)
@@ -1428,9 +1486,7 @@ class HuntContext:
 
     def _get_finding_by_id(self, finding_id: int) -> dict[str, Any] | None:
         """Get a single finding by its primary key."""
-        row = self._conn.execute(
-            "SELECT * FROM findings WHERE id = ?", (finding_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
         if not row:
             return None
         r = dict(row)
@@ -1492,9 +1548,7 @@ class HuntContext:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    def get_chains(
-        self, hunt_id: str, severity: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_chains(self, hunt_id: str, severity: str | None = None) -> list[dict[str, Any]]:
         """Query chains with optional severity filter."""
         sql = "SELECT * FROM chains WHERE hunt_id = ?"
         params: list[Any] = [hunt_id]
@@ -1514,9 +1568,7 @@ class HuntContext:
 
     def get_chain(self, chain_id: int) -> dict[str, Any] | None:
         """Get a single chain by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM chains WHERE id = ?", (chain_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM chains WHERE id = ?", (chain_id,)).fetchone()
         if not row:
             return None
         r = dict(row)
@@ -1535,9 +1587,7 @@ class HuntContext:
 
     def delete_chains(self, hunt_id: str) -> int:
         """Delete all chains for a hunt. Returns rows deleted."""
-        cursor = self._conn.execute(
-            "DELETE FROM chains WHERE hunt_id = ?", (hunt_id,)
-        )
+        cursor = self._conn.execute("DELETE FROM chains WHERE hunt_id = ?", (hunt_id,))
         self._conn.commit()
         return cursor.rowcount
 
@@ -1618,9 +1668,7 @@ class HuntContext:
 
     def get_report(self, report_id: int) -> dict[str, Any] | None:
         """Get a single report by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM reports WHERE id = ?", (report_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
         if not row:
             return None
         return self._deserialize_report_row(dict(row))
@@ -1648,7 +1696,5 @@ class HuntContext:
             updates.append("platform_status = ?")
             params.append(platform_status)
         params.append(report_id)
-        self._conn.execute(
-            f"UPDATE reports SET {', '.join(updates)} WHERE id = ?", params
-        )
+        self._conn.execute(f"UPDATE reports SET {', '.join(updates)} WHERE id = ?", params)
         self._conn.commit()

@@ -57,6 +57,7 @@ def _select_canonical(findings: list[dict]) -> dict:
 
     Priority: highest confidence → highest severity → most evidence → most recent.
     """
+
     def score(f: dict) -> tuple:
         conf = 3 if f.get("confirmed") else 1
         sev = _SEVERITY_RANK.get(f.get("severity", "info"), 0)
@@ -114,22 +115,23 @@ def deduplicate_findings(
         fid = f["id"]
         url = f.get("url") or ""
         param = f.get("parameter", "")
+        method = f.get("method", "")
         ftype = _normalize_vuln_class(f.get("finding_type", ""))
 
-        # Signal 1a: exact URL + param (cross-type — Nuclei + manual find same thing)
+        # Signal 1a: exact URL + method + param (cross-type — Nuclei + manual find same thing)
         if url:
-            key1a = (url, param)
+            key1a = (url, method, param)
             by_url_param_exact.setdefault(key1a, []).append(fid)
 
-        # Signal 1b: exact URL + param + vuln class
+        # Signal 1b: exact URL + method + param + vuln class
         if url and ftype:
-            key1b = (url, param, ftype)
+            key1b = (url, method, param, ftype)
             by_url_param_typed.setdefault(key1b, []).append(fid)
 
-        # Signal 2: host + param + vuln class (broader)
+        # Signal 2: host + method + param + vuln class (broader)
         host = _extract_host(url)
         if host and param and ftype:
-            key2 = (host, param, ftype)
+            key2 = (host, method, param, ftype)
             by_host_param.setdefault(key2, []).append(fid)
 
     # Union findings that share a key
@@ -185,11 +187,14 @@ def deduplicate_findings(
     if not dry_run and result:
         context.delete_dedup_groups(hunt_id)
         for g in result:
-            g.id = context.insert_dedup_group(hunt_id, {
-                "canonical_id": g.canonical_id,
-                "finding_ids": g.finding_ids,
-                "reason": g.reason,
-            })
+            g.id = context.insert_dedup_group(
+                hunt_id,
+                {
+                    "canonical_id": g.canonical_id,
+                    "finding_ids": g.finding_ids,
+                    "reason": g.reason,
+                },
+            )
 
     return result
 
@@ -206,6 +211,7 @@ def check_duplicate(
     """
     url = finding.get("url") or ""
     param = finding.get("parameter", "")
+    method = finding.get("method", "")
     ftype = _normalize_vuln_class(finding.get("finding_type", ""))
 
     if not url or not ftype:
@@ -217,23 +223,30 @@ def check_duplicate(
     for ef in all_findings:
         ef_url = ef.get("url") or ""
         ef_param = ef.get("parameter", "")
+        ef_method = ef.get("method", "")
         ef_type = _normalize_vuln_class(ef.get("finding_type", ""))
 
-        # Exact URL + parameter match (same or cross-type)
-        if ef_url == url and ef_param == param:
+        # Exact URL + method + parameter match (same or cross-type)
+        if ef_url == url and ef_method == method and ef_param == param:
             return DedupeGroup(
                 canonical_id=ef["id"],
                 finding_ids=[ef["id"]],
-                reason=f"Exact URL + parameter match: {url}",
+                reason=f"Exact URL + method + parameter match: {method} {url}",
             )
 
-        # Host + param match (same vuln class only)
+        # Host + method + param match (same vuln class only)
         ef_host = _extract_host(ef_url)
-        if ef_host == host and ef_param == param and param and ef_type == ftype:
+        if (
+            ef_host == host
+            and ef_method == method
+            and ef_param == param
+            and param
+            and ef_type == ftype
+        ):
             return DedupeGroup(
                 canonical_id=ef["id"],
                 finding_ids=[ef["id"]],
-                reason=f"Same host ({host}) + parameter ({param})",
+                reason=f"Same host ({host}) + method ({method}) + parameter ({param})",
             )
 
     return None

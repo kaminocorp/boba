@@ -128,6 +128,7 @@ class ToolResult:
     filtered_count: int = 0
     parse_errors: int = 0
     timed_out: bool = False
+    output_truncated: bool = False
 
 
 @dataclass

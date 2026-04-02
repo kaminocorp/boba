@@ -142,10 +142,15 @@ async def urls(
         total_filtered += result.filtered_count
         max_duration = max(max_duration, result.duration_seconds)
 
+    # If all adapters failed, report non-zero exit code so callers can
+    # distinguish "both URL sources failed" from "found 0 URLs".
+    adapter_failures = sum(1 for r in results if isinstance(r, Exception))
+    all_failed = adapter_failures == len(results)
+
     return ToolResult(
         tool_name="recon.urls",
         command=[],
-        exit_code=0,
+        exit_code=1 if all_failed else 0,
         raw_stdout="",
         raw_stderr="",
         duration_seconds=max_duration,

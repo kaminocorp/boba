@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.3](#033--final-pre-prod-hardening) — 4-agent parallel review: JSON array merge via custom SQLite function (replaces fragile substr concat), findings method-aware UNIQUE + dedup, output truncation propagation, IDOR scope enforcement at entry, CIDR exclusion symmetry fix, vuln test deadlines, recon.urls failure signaling, thread-safety docs. 8 fixes, 0 regressions (579 tests)
 - [0.3.2](#032--production-readiness-sweep) — 6-agent parallel review: report UNIQUE NULL fix, evidence merge data corruption fix, browser stale-auth fix, CSRF/IDOR/auth false-positive/negative fixes, coverage host-filter + distinct counts, cross-type dedup, chain hunt_id, adapter null-safety, naabu scope mode, OOM pre-check, Bugcrowd formatter dedup step, CLI cleanup. 25 fixes, 0 regressions (579 tests)
 - [0.3.1](#031--pre-production-hardening) — 5-agent parallel review: CVSS formula fix, CLI coverage integration, scope scheme bypass, IDOR/race/SQLi/CSRF/AI detection improvements, host upsert COALESCE, finding NULL dedup, chain idempotency, report severity consistency. 19 fixes, 0 regressions (579 tests)
 - [0.3.0](#030--intelligence-analysis-chaining--reporting) — V3: analysis engine (coverage, dedup, CVSS, chaining, prioritization), reporting pipeline (draft, format, PoC), 6 new vuln tools (race, redirect, CSRF, mass assignment, reset, AI prompt injection). 4 new tables, 2 new packages, 133 new tests (579 total)
@@ -26,6 +27,35 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.3 — Final Pre-Prod Hardening
+
+**Date:** 2026-04-02
+**Scope:** 8 fixes across core, adapters, tools, and analysis layers. 0 regressions (579 tests pass).
+
+4-agent parallel review of all layers after V1/V2/V3 + 25 rounds of hardening. Triaged ~50 raw findings down to 8 real, actionable issues. Adapters, CLI, and reporting came back clean.
+
+### Tier 1 — Must-Fix (5 issues)
+
+1. **JSON array merge corruption replaced with custom SQLite function** (`context.py`) — The `substr`/`||` concat approach for merging `evidence` and `request_ids` on finding upsert could produce invalid JSON in edge cases (whitespace variants, non-array JSON remnants from pre-0.3.2 data). Replaced entirely with `json_array_merge()`, a Python custom SQLite function registered at connection init. Handles all edge cases: null, `'null'`, `'[]'`, non-array JSON, malformed strings. Always produces valid JSON arrays.
+
+2. **`recon.urls()` now returns `exit_code=1` when all adapters fail** (`recon.py:145`) — `asyncio.gather(return_exceptions=True)` masked adapter failures: the merged `ToolResult` always showed `exit_code=0`. Downstream code couldn't distinguish "both URL sources crashed" from "found 0 URLs." Now tracks adapter failure count and signals non-zero when all fail.
+
+3. **Scope engine enforced at `test_idor()` entry** (`vuln.py:80`) — Scope check only happened in the object-ID enumeration loop, not for the initial three-way comparison (User A / User B / no-auth). A manually triggered IDOR test on an out-of-scope URL would run and persist findings. Now checks `scope_engine.is_in_scope(endpoint)` at function entry and returns early with a skip result.
+
+4. **Findings UNIQUE constraint now includes HTTP method** (`context.py`, `dedup.py`) — UNIQUE was `(hunt_id, finding_type, url, parameter)`, which collapsed `POST /api/users/:id` IDOR and `GET /api/users/:id` IDOR into the same row (overwriting one). Changed to `(hunt_id, finding_type, url, method, parameter)`. Added `method TEXT NOT NULL DEFAULT ''` column with a safe schema migration (table recreation preserving existing data). Dedup keys in both `deduplicate_findings()` and `check_duplicate()` updated to include method.
+
+5. **Output truncation flag propagated to `ToolResult`** (`models.py`, `base.py`) — When subprocess output exceeds the 256 MB cap, `SubprocessResult.output_truncated=True` was set but never surfaced. Added `output_truncated: bool = False` to `ToolResult` and propagated from subprocess result. Base adapter now logs a warning when truncation occurs.
+
+### Tier 2 — Should-Fix (3 issues)
+
+6. **IP CIDR exclusion logic made symmetric** (`scope.py:149`) — Exclusion checks used both `subnet_of` AND `supernet_of`, but inclusion only checked `subnet_of`. This asymmetry meant a target CIDR that was a supernet of an excluded range got rejected entirely (e.g., excluding `10.0.0.0/24` blocked the entire `10.0.0.0/23`). Removed `supernet_of` from exclusion checks. Exclusions now only reject CIDRs that fall within (are subnets of) excluded ranges, consistent with how inclusions work.
+
+7. **`HuntContext` documented as single-threaded** (`context.py`) — The `_in_transaction` instance flag is not thread-safe, but `sqlite3.connect()` defaults to `check_same_thread=True`, which prevents cross-thread access at the connection level. Added class docstring documenting that each thread must use its own `HuntContext` instance.
+
+8. **Vuln test functions now have configurable deadlines** (`vuln.py`) — `test_sqli`, `test_xss`, `test_ssrf`, and `test_ai` loop through 50–100+ payloads with only per-request timeouts (15s). A slow target could cause tests to hang for 10+ minutes. Added `max_test_seconds: float = 300` parameter and deadline checking at the top of each outer loop. Tests exit gracefully with partial results when the deadline is reached.
 
 ---
 

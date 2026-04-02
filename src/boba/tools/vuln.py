@@ -65,14 +65,17 @@ def _record_coverage(
     if not context or not hunt_id:
         return
     try:
-        context.upsert_coverage(hunt_id, {
-            "url": url,
-            "method": method,
-            "parameter": parameter,
-            "test_type": test_type,
-            "tool_run_id": tool_run_id,
-            "finding_id": finding_id,
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": url,
+                "method": method,
+                "parameter": parameter,
+                "test_type": test_type,
+                "tool_run_id": tool_run_id,
+                "finding_id": finding_id,
+            },
+        )
     except Exception as exc:
         logger.debug("Failed to record coverage for %s %s: %s", test_type, url, exc)
 
@@ -96,6 +99,15 @@ async def test_idor(
     3. Request with no auth → response_unauth
     4. Compare: if response_b ≈ response_a AND response_b ≠ response_unauth → IDOR
     """
+    # Scope check at function entry — reject out-of-scope endpoints
+    if scope_engine and not scope_engine.is_in_scope(endpoint):
+        return VulnTestResult(
+            test_type="idor",
+            vulnerable=False,
+            title=f"IDOR on {endpoint}",
+            description=f"Skipped: {endpoint} is out of scope",
+        )
+
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
 
@@ -260,10 +272,13 @@ async def test_ssrf(
     poll_timeout_seconds: int = 10,
     context: HuntContext | None = None,
     hunt_id: str = "",
+    max_test_seconds: float = 300,
 ) -> VulnTestResult:
     """Test for Server-Side Request Forgery (SSRF).
 
     Injects internal URLs and OOB callbacks into parameters.
+
+    max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
     payloads = payloads or ssrf_payloads.ALL
     request_ids: list[int] = []
@@ -272,12 +287,16 @@ async def test_ssrf(
     cookies = session.cookies if session else {}
     vulnerable = False
     confidence = Confidence.POSSIBLE
+    _deadline = asyncio.get_event_loop().time() + max_test_seconds
 
     # Default injection: replace param values in URL
     if not injection_points:
         injection_points = [{"location": "url_param", "name": "url"}]
 
     for point in injection_points:
+        if asyncio.get_event_loop().time() > _deadline:
+            logger.warning("test_ssrf timed out after %.0fs on %s", max_test_seconds, url)
+            break
         param_name = point.get("name", "url")
 
         for payload in payloads:
@@ -429,12 +448,15 @@ async def test_xss(
     oob_manager: OOBManager | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
+    max_test_seconds: float = 300,
 ) -> VulnTestResult:
     """Test for Cross-Site Scripting (XSS).
 
     1. Reflected: inject payloads, check if they appear unescaped in response
     2. DOM-based: render in browser, check if canary JS executes
     3. Blind: inject OOB callback payloads
+
+    max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
     payloads = payloads or xss_payloads.BASIC
     request_ids: list[int] = []
@@ -445,8 +467,12 @@ async def test_xss(
     confidence = Confidence.POSSIBLE
 
     test_params = params or {"q": ""}
+    _deadline = asyncio.get_event_loop().time() + max_test_seconds
 
     for param_name in test_params:
+        if asyncio.get_event_loop().time() > _deadline:
+            logger.warning("test_xss timed out after %.0fs on %s", max_test_seconds, url)
+            break
         for payload in payloads:
             # Build URL with injected payload (properly URL-encoded)
             test_url = _inject_param(url, param_name, payload)
@@ -587,6 +613,7 @@ async def test_sqli(
     payloads: list[str] | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
+    max_test_seconds: float = 300,
 ) -> VulnTestResult:
     """Test for SQL injection.
 
@@ -594,6 +621,8 @@ async def test_sqli(
     2. Error-based: inject ' " ) → check for SQL error strings
     3. Boolean-based: true vs false conditions → compare response lengths
     4. Time-based: SLEEP payloads → check response time delta (≥3s over baseline)
+
+    max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
     payloads = payloads or sqli_payloads.ERROR_BASED
     request_ids: list[int] = []
@@ -604,8 +633,12 @@ async def test_sqli(
     confidence = Confidence.POSSIBLE
 
     test_params = params or {"id": "1"}
+    _deadline = asyncio.get_event_loop().time() + max_test_seconds
 
     for param_name, default_val in test_params.items():
+        if asyncio.get_event_loop().time() > _deadline:
+            logger.warning("test_sqli timed out after %.0fs on %s", max_test_seconds, url)
+            break
         # Baseline: request with the normal parameter value, so true/false comparisons
         # are against the same endpoint shape (not the bare URL without the param).
         baseline_url = _inject_param(url, param_name, default_val)
@@ -656,8 +689,9 @@ async def test_sqli(
 
         # Boolean-based detection — try multiple payload styles
         # (single-quote string context AND numeric context)
-        boolean_pairs = list(zip(sqli_payloads.BOOLEAN_BASED[::2],
-                                 sqli_payloads.BOOLEAN_BASED[1::2]))
+        boolean_pairs = list(
+            zip(sqli_payloads.BOOLEAN_BASED[::2], sqli_payloads.BOOLEAN_BASED[1::2])
+        )
         for true_payload, false_payload in boolean_pairs:
             resp_true = await http_client.request(
                 method=method,
@@ -962,8 +996,13 @@ async def test_race(
     # Send concurrent requests
     async def _send():
         return await http_client.request(
-            method=method, url=url, headers=headers, cookies=cookies,
-            body=body, source="test_race", session_name=session.name,
+            method=method,
+            url=url,
+            headers=headers,
+            cookies=cookies,
+            body=body,
+            source="test_race",
+            session_name=session.name,
             tags=["race"],
         )
 
@@ -982,29 +1021,35 @@ async def test_race(
     if len(unique_statuses) > 1:
         vulnerable = True
         confidence = Confidence.LIKELY
-        evidence.append({
-            "type": "status_divergence",
-            "status_codes": status_codes,
-            "unique_count": len(unique_statuses),
-        })
+        evidence.append(
+            {
+                "type": "status_divergence",
+                "status_codes": status_codes,
+                "unique_count": len(unique_statuses),
+            }
+        )
     elif unique_bodies > 1:
         # Body divergence alone is evidence-only (timestamps, CSRF tokens, etc.
         # cause natural variance). Only status divergence confirms a race.
-        evidence.append({
-            "type": "body_divergence",
-            "unique_bodies": unique_bodies,
-            "total_requests": concurrency,
-        })
+        evidence.append(
+            {
+                "type": "body_divergence",
+                "unique_bodies": unique_bodies,
+                "total_requests": concurrency,
+            }
+        )
 
     # Multiple successes — informational evidence, not a standalone signal
     # (most endpoints return 200 for all requests regardless of serialization)
     success_count = sum(1 for s in status_codes if 200 <= s < 300)
     if success_count > 1:
-        evidence.append({
-            "type": "multiple_successes",
-            "success_count": success_count,
-            "total_requests": concurrency,
-        })
+        evidence.append(
+            {
+                "type": "multiple_successes",
+                "success_count": success_count,
+                "total_requests": concurrency,
+            }
+        )
 
     result = VulnTestResult(
         test_type="race",
@@ -1012,13 +1057,17 @@ async def test_race(
         confidence=confidence,
         title=f"Race condition on {url}",
         description=f"Concurrent requests produced divergent responses ({len(unique_statuses)} status codes, {unique_bodies} unique bodies)"
-        if vulnerable else "",
+        if vulnerable
+        else "",
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Implement mutex/locking on state-changing operations",
-                         "Use database-level unique constraints for one-time actions"]
-        if vulnerable else [],
+        recommendations=[
+            "Implement mutex/locking on state-changing operations",
+            "Use database-level unique constraints for one-time actions",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, method, "", "race")
     return result
@@ -1052,8 +1101,12 @@ async def test_redirect(
         test_url = _inject_param(url, param, payload)
 
         resp = await http_client.request(
-            method="GET", url=test_url, headers=headers, cookies=cookies,
-            source="test_redirect", tags=["redirect", param],
+            method="GET",
+            url=test_url,
+            headers=headers,
+            cookies=cookies,
+            source="test_redirect",
+            tags=["redirect", param],
         )
         request_ids.append(resp.request_id)
 
@@ -1066,18 +1119,24 @@ async def test_redirect(
 
         if location and resp.status_code in (301, 302, 303, 307, 308):
             redirect_host = urlparse(location).hostname or ""
-            if redirect_host and redirect_host != target_host and not redirect_host.endswith(f".{target_host}"):
+            if (
+                redirect_host
+                and redirect_host != target_host
+                and not redirect_host.endswith(f".{target_host}")
+            ):
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
-                evidence.append({
-                    "type": "external_redirect",
-                    "payload": payload,
-                    "param": param,
-                    "location": location,
-                    "redirect_host": redirect_host,
-                    "status_code": resp.status_code,
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "external_redirect",
+                        "payload": payload,
+                        "param": param,
+                        "location": location,
+                        "redirect_host": redirect_host,
+                        "status_code": resp.status_code,
+                        "request_id": resp.request_id,
+                    }
+                )
                 break
 
     result = VulnTestResult(
@@ -1089,9 +1148,12 @@ async def test_redirect(
         severity=Severity.MEDIUM if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Validate redirect URLs against an allowlist",
-                         "Use relative paths instead of full URLs for redirects"]
-        if vulnerable else [],
+        recommendations=[
+            "Validate redirect URLs against an allowlist",
+            "Use relative paths instead of full URLs for redirects",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, "GET", param, "redirect")
     return result
@@ -1119,8 +1181,9 @@ async def test_csrf(
 
     # Test 1: Send request without CSRF token
     # Strip known CSRF headers
-    clean_headers = {k: v for k, v in headers.items()
-                     if k.lower() not in ("x-csrf-token", "x-xsrf-token")}
+    clean_headers = {
+        k: v for k, v in headers.items() if k.lower() not in ("x-csrf-token", "x-xsrf-token")
+    }
     # Strip known CSRF token params from request body
     clean_body = body
     if clean_body:
@@ -1128,42 +1191,52 @@ async def test_csrf(
             body_obj = _json_mod.loads(clean_body)
             if isinstance(body_obj, dict):
                 token_names_lower = {n.lower() for n in csrf_payloads.TOKEN_PARAM_NAMES}
-                body_obj = {k: v for k, v in body_obj.items()
-                            if k.lower() not in token_names_lower}
+                body_obj = {k: v for k, v in body_obj.items() if k.lower() not in token_names_lower}
                 clean_body = _json_mod.dumps(body_obj)
         except (ValueError, TypeError):
             # Form-encoded body — strip token params
             try:
                 params = parse_qs(clean_body, keep_blank_values=True)
                 token_names_lower = {n.lower() for n in csrf_payloads.TOKEN_PARAM_NAMES}
-                params = {k: v for k, v in params.items()
-                          if k.lower() not in token_names_lower}
+                params = {k: v for k, v in params.items() if k.lower() not in token_names_lower}
                 clean_body = urlencode(params, doseq=True) if params else ""
             except Exception:
                 pass
 
     resp_no_token = await http_client.request(
-        method=method, url=url, headers=clean_headers, cookies=cookies,
-        body=clean_body, source="test_csrf", tags=["csrf", "no_token"],
+        method=method,
+        url=url,
+        headers=clean_headers,
+        cookies=cookies,
+        body=clean_body,
+        source="test_csrf",
+        tags=["csrf", "no_token"],
     )
     request_ids.append(resp_no_token.request_id)
 
     if 200 <= resp_no_token.status_code < 400:
         vulnerable = True
         confidence = Confidence.LIKELY
-        evidence.append({
-            "type": "no_csrf_token",
-            "status_code": resp_no_token.status_code,
-            "note": "Request accepted without CSRF token",
-        })
+        evidence.append(
+            {
+                "type": "no_csrf_token",
+                "status_code": resp_no_token.status_code,
+                "note": "Request accepted without CSRF token",
+            }
+        )
 
     # Test 2: Send with invalid CSRF token
     invalid_headers = dict(clean_headers)
     invalid_headers["X-CSRF-Token"] = "invalid-token-value"
 
     resp_invalid = await http_client.request(
-        method=method, url=url, headers=invalid_headers, cookies=cookies,
-        body=clean_body, source="test_csrf", tags=["csrf", "invalid_token"],
+        method=method,
+        url=url,
+        headers=invalid_headers,
+        cookies=cookies,
+        body=clean_body,
+        source="test_csrf",
+        tags=["csrf", "invalid_token"],
     )
     request_ids.append(resp_invalid.request_id)
 
@@ -1173,29 +1246,38 @@ async def test_csrf(
         else:
             vulnerable = True
             confidence = Confidence.LIKELY
-        evidence.append({
-            "type": "invalid_token_accepted",
-            "status_code": resp_invalid.status_code,
-            "note": "Request accepted with invalid CSRF token",
-        })
+        evidence.append(
+            {
+                "type": "invalid_token_accepted",
+                "status_code": resp_invalid.status_code,
+                "note": "Request accepted with invalid CSRF token",
+            }
+        )
 
     # Test 3: Cross-origin request
     cross_origin_headers = dict(clean_headers)
     cross_origin_headers.update(csrf_payloads.CROSS_ORIGIN_HEADERS)
 
     resp_cross = await http_client.request(
-        method=method, url=url, headers=cross_origin_headers, cookies=cookies,
-        body=body, source="test_csrf", tags=["csrf", "cross_origin"],
+        method=method,
+        url=url,
+        headers=cross_origin_headers,
+        cookies=cookies,
+        body=body,
+        source="test_csrf",
+        tags=["csrf", "cross_origin"],
     )
     request_ids.append(resp_cross.request_id)
 
     if 200 <= resp_cross.status_code < 400:
-        evidence.append({
-            "type": "cross_origin_accepted",
-            "status_code": resp_cross.status_code,
-            "origin": csrf_payloads.CROSS_ORIGIN_HEADERS.get("Origin", ""),
-            "note": "Cross-origin request accepted",
-        })
+        evidence.append(
+            {
+                "type": "cross_origin_accepted",
+                "status_code": resp_cross.status_code,
+                "origin": csrf_payloads.CROSS_ORIGIN_HEADERS.get("Origin", ""),
+                "note": "Cross-origin request accepted",
+            }
+        )
 
     result = VulnTestResult(
         test_type="csrf",
@@ -1203,13 +1285,17 @@ async def test_csrf(
         confidence=confidence,
         title=f"CSRF on {url}",
         description="Cross-site request forgery — state-changing request accepted without token validation"
-        if vulnerable else "",
+        if vulnerable
+        else "",
         severity=Severity.MEDIUM if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Implement anti-CSRF tokens on all state-changing endpoints",
-                         "Set SameSite=Strict on session cookies"]
-        if vulnerable else [],
+        recommendations=[
+            "Implement anti-CSRF tokens on all state-changing endpoints",
+            "Set SameSite=Strict on session cookies",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, method, "", "csrf")
     return result
@@ -1241,30 +1327,45 @@ async def test_mass_assign(
 
     base = base_body or {}
     extras = extra_fields or {
-        "isAdmin": True, "role": "admin", "verified": True,
-        "balance": 999999, "plan": "enterprise",
+        "isAdmin": True,
+        "role": "admin",
+        "verified": True,
+        "balance": 999999,
+        "plan": "enterprise",
     }
 
     # Step 1: GET baseline
     resp_before = await http_client.request(
-        method="GET", url=url, headers=headers, cookies=cookies,
-        source="test_mass_assign", tags=["mass_assign", "baseline"],
+        method="GET",
+        url=url,
+        headers=headers,
+        cookies=cookies,
+        source="test_mass_assign",
+        tags=["mass_assign", "baseline"],
     )
     request_ids.append(resp_before.request_id)
 
     # Step 2: Send with extra fields
     payload = {**base, **extras}
     resp_update = await http_client.request(
-        method=method, url=url, headers=headers, cookies=cookies,
+        method=method,
+        url=url,
+        headers=headers,
+        cookies=cookies,
         body=_json_mod.dumps(payload),
-        source="test_mass_assign", tags=["mass_assign", "inject"],
+        source="test_mass_assign",
+        tags=["mass_assign", "inject"],
     )
     request_ids.append(resp_update.request_id)
 
     # Step 3: GET again to check persistence
     resp_after = await http_client.request(
-        method="GET", url=url, headers=headers, cookies=cookies,
-        source="test_mass_assign", tags=["mass_assign", "verify"],
+        method="GET",
+        url=url,
+        headers=headers,
+        cookies=cookies,
+        source="test_mass_assign",
+        tags=["mass_assign", "verify"],
     )
     request_ids.append(resp_after.request_id)
 
@@ -1284,12 +1385,14 @@ async def test_mass_assign(
                     if actual == value and before_val != value:
                         vulnerable = True
                         confidence = Confidence.CONFIRMED
-                        evidence.append({
-                            "type": "field_persisted",
-                            "field": field,
-                            "injected_value": value,
-                            "actual_value": actual,
-                        })
+                        evidence.append(
+                            {
+                                "type": "field_persisted",
+                                "field": field,
+                                "injected_value": value,
+                                "actual_value": actual,
+                            }
+                        )
     except (ValueError, TypeError):
         pass
 
@@ -1302,9 +1405,12 @@ async def test_mass_assign(
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Whitelist allowed fields in the API endpoint",
-                         "Never bind request body directly to model objects"]
-        if vulnerable else [],
+        recommendations=[
+            "Whitelist allowed fields in the API endpoint",
+            "Never bind request body directly to model objects",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, method, "", "mass_assign")
     return result
@@ -1341,8 +1447,13 @@ async def test_reset(
         host_inject_headers["Content-Type"] = "application/json"
 
     resp_host = await http_client.request(
-        method="POST", url=url, headers=host_inject_headers, cookies=cookies,
-        body=body, source="test_reset", tags=["reset", "host_injection"],
+        method="POST",
+        url=url,
+        headers=host_inject_headers,
+        cookies=cookies,
+        body=body,
+        source="test_reset",
+        tags=["reset", "host_injection"],
     )
     request_ids.append(resp_host.request_id)
 
@@ -1350,30 +1461,39 @@ async def test_reset(
     if attack_host in resp_host.body_text:
         vulnerable = True
         confidence = Confidence.CONFIRMED
-        evidence.append({
-            "type": "host_header_injection",
-            "injected_host": attack_host,
-            "status_code": resp_host.status_code,
-            "note": "Attack host reflected in password reset response",
-        })
+        evidence.append(
+            {
+                "type": "host_header_injection",
+                "injected_host": attack_host,
+                "status_code": resp_host.status_code,
+                "note": "Attack host reflected in password reset response",
+            }
+        )
 
     # Test 2: Rate limiting — send 5 rapid requests
     rate_successes = 0
     for i in range(5):
         resp_rate = await http_client.request(
-            method="POST", url=url, headers=headers, cookies=cookies,
-            body=body, source="test_reset", tags=["reset", "rate_limit"],
+            method="POST",
+            url=url,
+            headers=headers,
+            cookies=cookies,
+            body=body,
+            source="test_reset",
+            tags=["reset", "rate_limit"],
         )
         request_ids.append(resp_rate.request_id)
         if 200 <= resp_rate.status_code < 400:
             rate_successes += 1
 
     if rate_successes >= 5:
-        evidence.append({
-            "type": "no_rate_limit",
-            "successful_requests": rate_successes,
-            "note": "All 5 rapid password reset requests succeeded — no rate limiting",
-        })
+        evidence.append(
+            {
+                "type": "no_rate_limit",
+                "successful_requests": rate_successes,
+                "note": "All 5 rapid password reset requests succeeded — no rate limiting",
+            }
+        )
 
     result = VulnTestResult(
         test_type="reset",
@@ -1384,9 +1504,12 @@ async def test_reset(
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Ignore Host header when generating reset links",
-                         "Implement rate limiting on password reset endpoints"]
-        if vulnerable else [],
+        recommendations=[
+            "Ignore Host header when generating reset links",
+            "Implement rate limiting on password reset endpoints",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, "POST", email_param, "reset")
     return result
@@ -1400,10 +1523,13 @@ async def test_ai(
     payloads: list[str] | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
+    max_test_seconds: float = 300,
 ) -> VulnTestResult:
     """Test LLM-powered features for prompt injection.
 
     Checks for system prompt exfiltration and instruction override.
+
+    max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
     payloads = payloads or ai_payloads.ALL
     request_ids: list[int] = []
@@ -1412,13 +1538,21 @@ async def test_ai(
     cookies = session.cookies if session else {}
     vulnerable = False
     confidence = Confidence.POSSIBLE
+    _deadline = asyncio.get_event_loop().time() + max_test_seconds
 
     for payload in payloads:
+        if asyncio.get_event_loop().time() > _deadline:
+            logger.warning("test_ai timed out after %.0fs on %s", max_test_seconds, url)
+            break
         test_url = _inject_param(url, param, payload)
 
         resp = await http_client.request(
-            method="GET", url=test_url, headers=headers, cookies=cookies,
-            source="test_ai", tags=["ai", param],
+            method="GET",
+            url=test_url,
+            headers=headers,
+            cookies=cookies,
+            source="test_ai",
+            tags=["ai", param],
         )
         request_ids.append(resp.request_id)
         body_lower = resp.body_text.lower()
@@ -1428,12 +1562,14 @@ async def test_ai(
             if marker.lower() in body_lower:
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
-                evidence.append({
-                    "type": "instruction_override",
-                    "payload": payload,
-                    "marker": marker,
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "instruction_override",
+                        "payload": payload,
+                        "marker": marker,
+                        "request_id": resp.request_id,
+                    }
+                )
                 break
 
         # Check for system prompt leak indicators (weighted scoring)
@@ -1444,12 +1580,14 @@ async def test_ai(
             if leak_score >= 4:
                 vulnerable = True
                 confidence = Confidence.LIKELY
-                evidence.append({
-                    "type": "system_prompt_leak",
-                    "payload": payload,
-                    "leak_score": leak_score,
-                    "request_id": resp.request_id,
-                })
+                evidence.append(
+                    {
+                        "type": "system_prompt_leak",
+                        "payload": payload,
+                        "leak_score": leak_score,
+                        "request_id": resp.request_id,
+                    }
+                )
 
         if vulnerable:
             break
@@ -1463,10 +1601,13 @@ async def test_ai(
         severity=Severity.HIGH if vulnerable else Severity.INFO,
         evidence=evidence,
         request_ids=request_ids,
-        recommendations=["Implement input sanitization for LLM inputs",
-                         "Use system prompt protection techniques",
-                         "Separate user input from system instructions"]
-        if vulnerable else [],
+        recommendations=[
+            "Implement input sanitization for LLM inputs",
+            "Use system prompt protection techniques",
+            "Separate user input from system instructions",
+        ]
+        if vulnerable
+        else [],
     )
     _record_coverage(context, hunt_id, url, "GET", param, "ai")
     return result

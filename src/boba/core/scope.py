@@ -146,7 +146,7 @@ class ScopeEngine:
             except ValueError:
                 return False
             for network in self._ip_excludes:
-                if target_net.subnet_of(network) or target_net.supernet_of(network):
+                if target_net.subnet_of(network):
                     return False
             for network in self._ip_includes:
                 if target_net.subnet_of(network):
@@ -177,7 +177,7 @@ class ScopeEngine:
             return False
         if len(url) == len(prefix):
             return True
-        return url[len(prefix)] in ("/"  , "?", "#", ":")
+        return url[len(prefix)] in ("/", "?", "#", ":")
 
     @staticmethod
     def _strip_scheme(url: str) -> str:

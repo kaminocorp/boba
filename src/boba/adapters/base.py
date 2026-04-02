@@ -308,6 +308,12 @@ class BaseAdapter(ABC):
             if self.SCOPE_MODE in ("post", "both"):
                 records, filtered_count = self.post_filter_records(records)
 
+            if result.output_truncated:
+                logger.warning(
+                    "%s output was truncated at max bytes; some results may be missing",
+                    self.TOOL_NAME,
+                )
+
             return ToolResult(
                 tool_name=self.TOOL_NAME,
                 command=cmd,
@@ -319,6 +325,7 @@ class BaseAdapter(ABC):
                 filtered_count=filtered_count,
                 parse_errors=parse_errors,
                 timed_out=result.timed_out,
+                output_truncated=result.output_truncated,
             )
         finally:
             self._cleanup_temp_files()
