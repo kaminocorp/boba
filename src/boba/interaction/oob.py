@@ -152,7 +152,8 @@ class OOBManager:
                                 entry["parameter"] = info["parameter"]
                                 break
 
-                        if listener_id is None or entry.get("listener_id") == listener_id:
+                        matched = entry.get("listener_id") is not None
+                        if matched and (listener_id is None or entry["listener_id"] == listener_id):
                             all_interactions.append(entry)
 
                     if all_interactions:

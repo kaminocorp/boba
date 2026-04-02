@@ -103,7 +103,10 @@ class BrowserManager:
         """Get existing or create new named browser context."""
         async with self._context_lock:
             if name in self._contexts:
-                return self._contexts[name]
+                ctx = self._contexts[name]
+                if cookies:
+                    await ctx.add_cookies(cookies)
+                return ctx
 
             if not self._browser:
                 raise BrowserError("Browser not started. Call start() first.")
@@ -142,7 +145,21 @@ class BrowserManager:
 
         async def _on_response(response: Any) -> None:
             try:
-                body = await response.body()
+                # Check Content-Length before reading to avoid OOM on huge responses
+                try:
+                    cl = int(response.headers.get("content-length", "0"))
+                except (ValueError, TypeError):
+                    cl = 0
+                if cl > _MAX_BROWSER_RESPONSE_BYTES:
+                    logger.warning(
+                        "Skipping body read for %s (content-length: %d > %d cap)",
+                        response.url,
+                        cl,
+                        _MAX_BROWSER_RESPONSE_BYTES,
+                    )
+                    body = None
+                else:
+                    body = await response.body()
                 if body and len(body) > _MAX_BROWSER_RESPONSE_BYTES:
                     logger.warning(
                         "Truncating browser response body for %s (%d bytes > %d cap)",

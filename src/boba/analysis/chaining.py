@@ -168,6 +168,7 @@ def detect_chains(
     for rule in CHAIN_RULES:
         matched = _match_rule(rule, findings, by_type, by_host_type)
         if matched:
+            matched.hunt_id = hunt_id
             chains.append(matched)
 
     # Persist (idempotent: always clear previous chains, then insert new ones)
@@ -353,6 +354,7 @@ def suggest_chains(
         if matched:
             # Only include if at least one target finding is in the chain
             if any(fid in set(finding_ids) for fid in matched.finding_ids):
+                matched.hunt_id = hunt_id
                 chains.append(matched)
 
     return chains

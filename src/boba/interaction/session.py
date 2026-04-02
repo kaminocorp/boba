@@ -95,11 +95,15 @@ class SessionManager:
 
         for field_name, value in credentials.items():
             # Try common selectors — escape field_name for CSS safety
-            safe_name = field_name.replace("\\", "\\\\").replace("'", "\\'")
+            safe_name = (
+                field_name.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace('"', '\\"')
+                .replace("]", "\\]")
+            )
             filled = False
             for selector in [
                 f"[name='{safe_name}']",
-                f"#{safe_name}",
                 f"[id='{safe_name}']",
             ]:
                 try:

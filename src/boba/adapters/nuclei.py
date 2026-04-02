@@ -72,11 +72,11 @@ class NucleiAdapter(BaseAdapter):
             "finding_type": raw.get("type", ""),
             "host": raw.get("host", ""),
             "url": raw.get("matched-at", raw.get("host", "")),
-            "extracted_results": raw.get("extracted-results", []),
+            "extracted_results": raw.get("extracted-results") or [],
             "curl_command": raw.get("curl-command", ""),
             "description": info.get("description", ""),
-            "reference": info.get("reference", []),
-            "tags": info.get("tags", []),
+            "reference": info.get("reference") or [],
+            "tags": info.get("tags") or [],
             "matcher_name": raw.get("matcher-name", ""),
         }
 

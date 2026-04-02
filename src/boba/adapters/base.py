@@ -288,9 +288,10 @@ class BaseAdapter(ABC):
                     filtered_count=0,
                 )
 
-        cmd, output_file = self.build_command(targets, config)
-
+        cmd = None
+        output_file = None
         try:
+            cmd, output_file = self.build_command(targets, config)
             result = await self._execute(cmd, config)
             if result.exit_code != 0:
                 logger.warning(

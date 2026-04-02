@@ -66,7 +66,7 @@ class HttpxRunnerAdapter(BaseAdapter):
             "webserver": raw.get("webserver", ""),
             "content_length": raw.get("content_length"),
             "content_type": raw.get("content_type", ""),
-            "technologies": raw.get("tech", []),
+            "technologies": raw.get("tech") or [],
             "tls_version": tls_version,
             "final_url": raw.get("final_url", ""),
         }

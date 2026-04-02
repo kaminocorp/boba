@@ -360,6 +360,10 @@ CREATE TABLE IF NOT EXISTS reports (
     UNIQUE(hunt_id, finding_id, chain_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_finding
+    ON reports(hunt_id, finding_id) WHERE chain_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_chain
+    ON reports(hunt_id, chain_id) WHERE finding_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_reports_hunt   ON reports(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 """
@@ -1134,7 +1138,13 @@ class HuntContext:
                 finding.get("url") or "",
                 finding.get("endpoint"),
                 finding.get("parameter") or "",
-                json.dumps(finding.get("evidence")) if finding.get("evidence") else None,
+                json.dumps(
+                    finding["evidence"]
+                    if isinstance(finding.get("evidence"), list)
+                    else [finding["evidence"]]
+                    if finding.get("evidence")
+                    else None
+                ),
                 json.dumps(finding.get("request_ids", [])),
                 finding.get("tool_run_id"),
                 1 if finding.get("confirmed") else 0,
@@ -1555,6 +1565,10 @@ class HuntContext:
                 remediation = excluded.remediation,
                 evidence_refs = excluded.evidence_refs,
                 request_ids = excluded.request_ids,
+                platform = COALESCE(excluded.platform, reports.platform),
+                platform_report_id = COALESCE(excluded.platform_report_id, reports.platform_report_id),
+                platform_status = COALESCE(excluded.platform_status, reports.platform_status),
+                submitted_at = COALESCE(excluded.submitted_at, reports.submitted_at),
                 status = excluded.status,
                 updated_at = excluded.updated_at""",
             (

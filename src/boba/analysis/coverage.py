@@ -37,14 +37,17 @@ def get_coverage_summary(
     tested_urls = {r["url"] for r in coverage_records}
     tested = len(all_endpoints & tested_urls)
 
-    # Per-test-type counts
-    type_counts: dict[str, int] = {}
+    # Per-test-type counts (distinct endpoints, not record count)
+    type_endpoints: dict[str, set[str]] = {}
     for r in coverage_records:
         tt = r["test_type"]
-        type_counts[tt] = type_counts.get(tt, 0) + 1
+        type_endpoints.setdefault(tt, set()).add(r["url"])
+    type_counts = {tt: len(urls) for tt, urls in type_endpoints.items()}
 
     # Gaps = untested (url, test_type) pairs
     gaps = context.get_untested_endpoints(hunt_id, test_types=types)
+    if host:
+        gaps = [g for g in gaps if urlparse(g.get("url", "")).hostname == host]
 
     return CoverageSummary(
         total_endpoints=total,

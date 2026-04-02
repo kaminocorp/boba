@@ -93,10 +93,12 @@ def format_bugcrowd(report: ReportDraft) -> str:
     lines.append(report.summary)
     lines.append("")
 
-    # Steps to Reproduce
+    # Steps to Reproduce (skip first step if already shown as Location)
     lines.append("### Steps to Reproduce")
     lines.append("")
-    for i, step in enumerate(report.steps, 1):
+    has_location = report.steps and (report.finding_id is not None or report.chain_id is not None)
+    start = 1 if has_location else 0
+    for i, step in enumerate(report.steps[start:], start + 1):
         lines.append(f"{i}. {step}")
     lines.append("")
 

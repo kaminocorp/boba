@@ -62,14 +62,6 @@ def _safe_close_http(client) -> None:
         logger.debug("Failed to close HTTP client: %s", exc)
 
 
-async def _run_with_http_cleanup(client, coro):
-    """Run a coroutine and ensure the HTTP client is closed in the same event loop."""
-    try:
-        return await coro
-    finally:
-        await client.close()
-
-
 @contextmanager
 def _managed(data_dir: Path | None = None) -> Generator[Any, None, None]:
     """Context manager for CLI commands: creates manager, handles errors, cleans up."""
@@ -87,12 +79,7 @@ def _managed(data_dir: Path | None = None) -> Generator[Any, None, None]:
 
 @contextmanager
 def _managed_http(data_dir: Path | None, hunt_id: str) -> Generator[tuple[Any, Any], None, None]:
-    """Context manager for HTTP commands: creates manager + HttpClient, cleans up both.
-
-    HTTP client cleanup now happens inside the same event loop via
-    ``_run_with_http_cleanup`` — callers should wrap their coroutine with it.
-    The fallback ``_safe_close_http`` catches anything missed.
-    """
+    """Context manager for HTTP commands: creates manager + HttpClient, cleans up both."""
     manager = _get_manager(data_dir)
     client = None
     try:
@@ -156,7 +143,8 @@ def _parse_targets(targets: str | None) -> list[str] | None:
     """Parse a comma-separated target string into a list, or None if empty."""
     if not targets:
         return None
-    return [t.strip() for t in targets.split(",") if t.strip()]
+    result = [t.strip() for t in targets.split(",") if t.strip()]
+    return result or None
 
 
 # ═══════════════════ HUNT COMMANDS ═══════════════════
@@ -470,7 +458,7 @@ def enum_crawl(
     targets: Annotated[
         Optional[str], typer.Option("--targets", "-t", help="Comma-separated URLs")
     ] = None,
-    depth: Annotated[str, typer.Option("--depth", "-d", help="Crawl depth")] = "3",
+    depth: Annotated[int, typer.Option("--depth", "-d", help="Crawl depth")] = 3,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1094,7 +1082,11 @@ def analyze_chain_cmd(
         if finding_ids:
             from boba.analysis.chaining import suggest_chains
 
-            ids = [int(x.strip()) for x in finding_ids.split(",")]
+            try:
+                ids = [int(x.strip()) for x in finding_ids.split(",")]
+            except ValueError:
+                print_error("--finding-ids must be comma-separated integers (e.g., '1,2,3')")
+                raise typer.Exit(1)
             chains = suggest_chains(manager.context, hunt_id, ids)
         else:
             from boba.analysis.chaining import detect_chains

@@ -23,7 +23,7 @@ class NaabuAdapter(BaseAdapter):
     BINARY_NAMES = ["naabu"]
     OUTPUT_FORMAT = OutputFormat.JSON_LINES
     PRODUCES = "port"
-    SCOPE_MODE = "pre"
+    SCOPE_MODE = "both"
 
     def install_hint(self) -> str:
         return "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"

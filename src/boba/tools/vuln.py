@@ -838,7 +838,7 @@ async def test_auth(
         )
 
     # Test 2: JWT manipulation (if token provided)
-    if jwt_token and not vulnerable:
+    if jwt_token:
         try:
             # None algorithm attack
             none_token = auth_payloads.jwt_none_algorithm(jwt_token)
@@ -1163,7 +1163,7 @@ async def test_csrf(
 
     resp_invalid = await http_client.request(
         method=method, url=url, headers=invalid_headers, cookies=cookies,
-        body=body, source="test_csrf", tags=["csrf", "invalid_token"],
+        body=clean_body, source="test_csrf", tags=["csrf", "invalid_token"],
     )
     request_ids.append(resp_invalid.request_id)
 
@@ -1520,8 +1520,20 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
             key_overlap = len(keys_a & keys_b) / max(len(keys_a | keys_b), 1)
             if key_overlap < threshold:
                 return False
-            # Same structure — fall through to line-based value comparison
-            # to distinguish identical data from different data with same shape.
+            # Same structure — compare serialized values for each shared key
+            # to avoid false positives from APIs with identical schemas but
+            # different per-user data.
+            flat_a = _json.dumps(json_a, sort_keys=True, default=str)
+            flat_b = _json.dumps(json_b, sort_keys=True, default=str)
+            if flat_a == flat_b:
+                return True
+            # Count matching vs differing value tokens
+            tokens_a = flat_a.split(",")
+            tokens_b = flat_b.split(",")
+            token_set_a = set(tokens_a)
+            token_set_b = set(tokens_b)
+            token_overlap = len(token_set_a & token_set_b) / max(len(token_set_a | token_set_b), 1)
+            return token_overlap > threshold
     except (ValueError, TypeError):
         pass
 

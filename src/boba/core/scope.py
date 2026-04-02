@@ -138,8 +138,22 @@ class ScopeEngine:
         return False
 
     def _check_ip(self, ip_str: str) -> bool:
+        stripped = self._strip_port(ip_str)
+        # Handle CIDR notation (e.g. 10.0.0.0/24)
+        if "/" in stripped:
+            try:
+                target_net = ipaddress.ip_network(stripped, strict=False)
+            except ValueError:
+                return False
+            for network in self._ip_excludes:
+                if target_net.subnet_of(network) or target_net.supernet_of(network):
+                    return False
+            for network in self._ip_includes:
+                if target_net.subnet_of(network):
+                    return True
+            return False
         try:
-            addr = ipaddress.ip_address(self._strip_port(ip_str))
+            addr = ipaddress.ip_address(stripped)
         except ValueError:
             return False
         for network in self._ip_excludes:

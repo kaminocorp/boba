@@ -47,7 +47,7 @@ async def crawl(
     context: HuntContext,
     hunt: Hunt,
     targets: list[str] | None = None,
-    depth: str = "3",
+    depth: int | str = 3,
     config: AdapterConfig | None = None,
 ) -> ToolResult:
     """
@@ -71,7 +71,7 @@ async def crawl(
         )
 
     config = copy.deepcopy(config) if config else AdapterConfig()
-    config.extra_args_dict["depth"] = depth
+    config.extra_args_dict["depth"] = str(depth)
 
     scope = ScopeEngine(hunt.scope)
     adapter = KatanaAdapter(scope_engine=scope)

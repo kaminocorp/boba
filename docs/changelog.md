@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.2](#032--production-readiness-sweep) — 6-agent parallel review: report UNIQUE NULL fix, evidence merge data corruption fix, browser stale-auth fix, CSRF/IDOR/auth false-positive/negative fixes, coverage host-filter + distinct counts, cross-type dedup, chain hunt_id, adapter null-safety, naabu scope mode, OOM pre-check, Bugcrowd formatter dedup step, CLI cleanup. 25 fixes, 0 regressions (579 tests)
 - [0.3.1](#031--pre-production-hardening) — 5-agent parallel review: CVSS formula fix, CLI coverage integration, scope scheme bypass, IDOR/race/SQLi/CSRF/AI detection improvements, host upsert COALESCE, finding NULL dedup, chain idempotency, report severity consistency. 19 fixes, 0 regressions (579 tests)
 - [0.3.0](#030--intelligence-analysis-chaining--reporting) — V3: analysis engine (coverage, dedup, CVSS, chaining, prioritization), reporting pipeline (draft, format, PoC), 6 new vuln tools (race, redirect, CSRF, mass assignment, reset, AI prompt injection). 4 new tables, 2 new packages, 133 new tests (579 total)
 - [0.2.21](#0221--nuclei-collision--login-deepcopy--idor-empty-body--sqli-confirm) — Nuclei finding collision fix (template_id as unique key), session `login_*()` deep-copy consistency, IDOR empty-body false negative, Nuclei scope mode to "both", hunt_create JSON scope_rules, SQLi time-based confirmation, HuntManager context manager. 8 fixes + 12 new tests (446 total)
@@ -25,6 +26,71 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.2 — Production Readiness Sweep
+
+**Date:** 2026-04-02
+**Scope:** 25 fixes across all layers, 0 new tests needed (existing 579 pass), 0 regressions
+
+6-agent parallel codebase review across all layers (core, adapters, interaction, tools/vuln, analysis/reporting, CLI/tests). 26 raw findings triaged down to 25 actionable fixes. Recon/enum composition came back clean again — zero bugs after 23+ rounds of hardening.
+
+### Tier 1 — Must-Fix (6 issues)
+
+1. **Reports UNIQUE constraint broken by SQLite NULL semantics** (`context.py:360`) — `UNIQUE(hunt_id, finding_id, chain_id)` never deduplicates when `finding_id` or `chain_id` is NULL (the common case), so every `upsert_report` inserted a new row. Added partial unique indexes: `idx_reports_finding (hunt_id, finding_id) WHERE chain_id IS NULL` and `idx_reports_chain (hunt_id, chain_id) WHERE finding_id IS NULL`. Upsert dedup now works for all cases.
+
+2. **Evidence merge via `substr` concat corrupts non-array JSON** (`context.py:1137`) — if a finding's evidence was a dict (not a list), the SQL string surgery produced invalid JSON, permanently losing all evidence on next read. Now normalizes evidence to a JSON array before storage: dicts are wrapped in `[dict]`.
+
+3. **`upsert_report` silently dropped platform fields on conflict** (`context.py:1547-1559`) — `ON CONFLICT DO UPDATE SET` omitted `platform`, `platform_report_id`, `platform_status`, `submitted_at`. Platform submission tracking was silently lost on re-upsert. Added all four fields with COALESCE guards.
+
+4. **Adapter `dict.get(key, [])` returns `None` when JSON field is explicit null** (`httpx_runner.py:69`, `nuclei.py:75,78,79`) — `raw.get("tech", [])` returns `None` (not `[]`) when the key exists with value `null`. Downstream `for` loops crash with `TypeError`. Changed all to `raw.get("key") or []`.
+
+5. **Browser `get_or_create_context` discards new cookies on existing contexts** (`browser.py:105`) — returning the cached context without applying updated cookies meant `apply_session` after login used stale auth. Now calls `ctx.add_cookies(cookies)` on existing contexts.
+
+6. **CSRF invalid-token test used original body with valid CSRF token** (`vuln.py:1166`) — Test 2 sent `body=body` (containing the valid body token) instead of `body=clean_body`, causing false positives. Fixed to use `clean_body`.
+
+### Tier 2 — Should-Fix (9 issues)
+
+7. **`test_auth` skipped JWT tests when endpoint is publicly accessible** (`vuln.py:841`) — `not vulnerable` guard suppressed JWT `alg=none` and claim escalation tests after no-auth access succeeded. Removed the guard so both vulnerability types are independently tested.
+
+8. **Coverage summary returned unfiltered gaps when host specified** (`coverage.py:47`) — `get_coverage_summary(host=...)` had host-scoped counts but hunt-wide gaps. Added host filter to gaps using `urlparse(url).hostname` matching (same pattern as `get_coverage_gaps`).
+
+9. **Coverage type counts were record counts, not distinct endpoint counts** (`coverage.py:41-44`) — `type_counts["xss"] = 10` could mean 2 endpoints tested 5× each, misleading agents. Now counts distinct URLs per test type using `set()`.
+
+10. **Returned chains had `hunt_id=""` in memory** (`chaining.py:280`) — `_build_chain` set `hunt_id=""`, and neither `detect_chains` nor `suggest_chains` updated it on the returned objects. Now both set `chain.hunt_id = hunt_id` after creation.
+
+11. **Temp file leak in ffuf when wordlist missing** (`base.py:291`, `ffuf.py:55`) — `build_command()` was called outside the `try/finally` block, so a `FileNotFoundError` from missing wordlist leaked the output temp file. Moved `build_command` inside `try` with `cmd`/`output_file` pre-initialized to `None`.
+
+12. **Naabu `SCOPE_MODE = "pre"` skipped post-filtering** (`naabu.py:26`) — CNAME-resolved hosts could leak through without scope check. Changed to `"both"` matching httpx, nuclei, and katana for default-deny consistency.
+
+13. **Browser response body fully read before 50 MB cap check** (`browser.py:145`) — OOM vector on multi-GB responses. Added `Content-Length` pre-check: skips body read entirely when declared size exceeds cap.
+
+14. **`_parse_targets(",,,")` returned `[]` instead of `None`** (`main.py:155`) — empty list skipped context-derived target fallback, silently returning zero results. Now returns `None` when all entries are empty.
+
+15. **`check_duplicate` missed cross-type duplicates** (`dedup.py:218`) — only queried same-type findings. Nuclei "http" + manual "sqli" on same URL were not detected as duplicates inline. Now queries all findings and checks exact URL+param matches cross-type.
+
+### Tier 3 — Nice-to-Fix (10 issues)
+
+16. **CSS selector escaping incomplete in `login_form`** (`session.py:98`) — missing escapes for `"` and `]` caused login failure on forms with those characters in field names. Added escapes; also removed `#safe_name` bare selector (unreliable for names with special chars).
+
+17. **OOB `poll()` returned unmatched interactions without metadata** (`oob.py:155`) — interactions that didn't match any listener lacked `listener_id`, `purpose`, etc. Now only returns matched interactions.
+
+18. **`_bodies_similar` JSON comparison fell through to line-based for JSON bodies** (`vuln.py:1514`) — pretty-printed API responses with shared default fields could over-match. JSON path now uses serialized value-token comparison instead of falling through to line-based.
+
+19. **CIDR notation in `is_in_scope` failed** (`scope.py:140`) — `ip_address("10.0.0.0/24")` threw ValueError, rejecting valid in-scope networks. Added CIDR-aware branch using `ip_network` with `subnet_of` checks.
+
+20. **Dead confidence ranking in dedup canonical selection** (`dedup.py:61-64`) — `_CONFIDENCE_RANK` dict with unreachable "likely" level. Simplified to direct boolean: `3 if confirmed else 1`. Removed dead constant.
+
+21. **Bugcrowd formatter duplicated first step** (`formatter.py:86-100`) — step 1 appeared both as "Location" and as first numbered step. Now skips step 0 in "Steps to Reproduce" when Location section is present.
+
+22. **`enum crawl --depth` accepted non-numeric string** (`main.py:473`) — typed as `str` instead of `int`. Changed to `int` with `str()` conversion at adapter boundary.
+
+23. **Removed dead `_run_with_http_cleanup`** (`main.py:65-70`) — defined but never called. Removed function and updated referencing docstring.
+
+24. **`analyze chain --finding-ids` raw ValueError** (`main.py:1097`) — non-integer input produced cryptic Python error. Added try/except with user-friendly message.
+
+25. **27 CLI commands lack integration tests** — test/analyze/report/browser/http command groups have zero CLI coverage. Not fixed in this release; tracked for next hardening pass.
 
 ---
 

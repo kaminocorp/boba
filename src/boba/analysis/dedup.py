@@ -11,7 +11,6 @@ from boba.core.models import DedupeGroup
 logger = logging.getLogger(__name__)
 
 # Confidence ranking for canonical selection (higher = preferred)
-_CONFIDENCE_RANK = {"confirmed": 3, "likely": 2, "possible": 1}
 
 # Severity ranking for canonical selection (higher = preferred)
 _SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
@@ -59,10 +58,7 @@ def _select_canonical(findings: list[dict]) -> dict:
     Priority: highest confidence → highest severity → most evidence → most recent.
     """
     def score(f: dict) -> tuple:
-        conf = _CONFIDENCE_RANK.get(str(f.get("confirmed") and "confirmed" or "possible"), 0)
-        # Use actual confidence if available, else infer from confirmed flag
-        if f.get("confirmed"):
-            conf = 3
+        conf = 3 if f.get("confirmed") else 1
         sev = _SEVERITY_RANK.get(f.get("severity", "info"), 0)
         evidence = f.get("evidence")
         ev_count = len(evidence) if isinstance(evidence, list) else 0
@@ -215,14 +211,15 @@ def check_duplicate(
     if not url or not ftype:
         return None
 
-    existing = context.get_findings(hunt_id, finding_type=ftype)
+    all_findings = context.get_findings(hunt_id)
     host = _extract_host(url)
 
-    for ef in existing:
+    for ef in all_findings:
         ef_url = ef.get("url") or ""
         ef_param = ef.get("parameter", "")
+        ef_type = _normalize_vuln_class(ef.get("finding_type", ""))
 
-        # Exact match
+        # Exact URL + parameter match (same or cross-type)
         if ef_url == url and ef_param == param:
             return DedupeGroup(
                 canonical_id=ef["id"],
@@ -230,9 +227,9 @@ def check_duplicate(
                 reason=f"Exact URL + parameter match: {url}",
             )
 
-        # Host + param match
+        # Host + param match (same vuln class only)
         ef_host = _extract_host(ef_url)
-        if ef_host == host and ef_param == param and param:
+        if ef_host == host and ef_param == param and param and ef_type == ftype:
             return DedupeGroup(
                 canonical_id=ef["id"],
                 finding_ids=[ef["id"]],
