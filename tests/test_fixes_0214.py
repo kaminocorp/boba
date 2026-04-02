@@ -21,10 +21,15 @@ from boba.tools.vuln import _bodies_similar, _extract_json_keys
 class TestBodiesSimilarJSON:
     """_bodies_similar should use JSON key-structure comparison for JSON bodies."""
 
-    def test_same_keys_different_values_are_similar(self):
+    def test_same_keys_different_values_are_not_similar(self):
+        """Same JSON structure but different values → not similar.
+
+        Critical for IDOR: two user profiles with same schema but different
+        data must be flagged as different (not a shared endpoint).
+        """
         body_a = json.dumps({"user": "alice", "id": 1, "role": "admin"}).encode()
         body_b = json.dumps({"user": "bob", "id": 2, "role": "viewer"}).encode()
-        assert _bodies_similar(body_a, body_b) is True
+        assert _bodies_similar(body_a, body_b) is False
 
     def test_different_keys_are_not_similar(self):
         body_a = json.dumps({"user": "alice", "id": 1}).encode()

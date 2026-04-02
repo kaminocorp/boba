@@ -1201,6 +1201,9 @@ def report_format_cmd(
         if not report_data:
             print_error(f"Report {report_id} not found")
             raise typer.Exit(1)
+        if report_data["hunt_id"] != hunt_id:
+            print_error(f"Report {report_id} does not belong to hunt '{hunt_id}'")
+            raise typer.Exit(1)
 
         # Reconstruct ReportDraft from DB data
         draft = ReportDraft(
@@ -1226,7 +1229,10 @@ def report_format_cmd(
             "bugcrowd": format_bugcrowd,
             "markdown": format_markdown,
         }
-        formatter = formatters.get(platform, format_markdown)
+        formatter = formatters.get(platform)
+        if not formatter:
+            print_error(f"Invalid platform '{platform}'. Valid: {', '.join(formatters)}")
+            raise typer.Exit(1)
         console.print(formatter(draft))
 
 
@@ -1287,6 +1293,9 @@ def report_show_cmd(
         if not report:
             print_error(f"Report {report_id} not found")
             raise typer.Exit(1)
+        if report["hunt_id"] != hunt_id:
+            print_error(f"Report {report_id} does not belong to hunt '{hunt_id}'")
+            raise typer.Exit(1)
         format_output(report, fmt=fmt, title="Report")
 
 
@@ -1318,7 +1327,10 @@ def test_idor_cmd(
             print_error("Session not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_idor(client, sa, sb, endpoint, method))
+        result = asyncio.run(vuln.test_idor(
+            client, sa, sb, endpoint, method,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="IDOR Test Result")
 
 
@@ -1342,6 +1354,7 @@ def test_ssrf_cmd(
                 url,
                 method,
                 injection_points=[{"location": "url_param", "name": param}],
+                context=manager.context, hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="SSRF Test Result")
@@ -1367,6 +1380,7 @@ def test_xss_cmd(
                 url,
                 method,
                 params={param: ""},
+                context=manager.context, hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="XSS Test Result")
@@ -1392,6 +1406,7 @@ def test_sqli_cmd(
                 url,
                 method,
                 params={param: "1"},
+                context=manager.context, hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="SQLi Test Result")
@@ -1410,7 +1425,10 @@ def test_auth_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_auth(client, endpoint, jwt_token=jwt))
+        result = asyncio.run(vuln.test_auth(
+            client, endpoint, jwt_token=jwt,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="Auth Test Result")
 
 
@@ -1435,10 +1453,15 @@ def test_race_cmd(
         if session_name:
             sess_mgr = _get_session_manager(manager, hunt_id)
             s = sess_mgr.get(session_name)
-            if s:
-                sess = s
+            if not s:
+                print_error(f"Session '{session_name}' not found")
+                raise typer.Exit(1)
+            sess = s
 
-        result = asyncio.run(vuln.test_race(client, sess, url, method, body, concurrency))
+        result = asyncio.run(vuln.test_race(
+            client, sess, url, method, body, concurrency,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="Race Condition Test Result")
 
 
@@ -1455,7 +1478,10 @@ def test_redirect_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_redirect(client, url, param))
+        result = asyncio.run(vuln.test_redirect(
+            client, url, param,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="Redirect Test Result")
 
 
@@ -1480,7 +1506,10 @@ def test_csrf_cmd(
             print_error(f"Session '{session_name}' not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_csrf(client, sess, url, method, body))
+        result = asyncio.run(vuln.test_csrf(
+            client, sess, url, method, body,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="CSRF Test Result")
 
 
@@ -1504,7 +1533,10 @@ def test_mass_assign_cmd(
             print_error(f"Session '{session_name}' not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_mass_assign(client, sess, url, method))
+        result = asyncio.run(vuln.test_mass_assign(
+            client, sess, url, method,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="Mass Assignment Test Result")
 
 
@@ -1521,7 +1553,10 @@ def test_reset_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_reset(client, url, email_param))
+        result = asyncio.run(vuln.test_reset(
+            client, url, email_param,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="Password Reset Test Result")
 
 
@@ -1538,7 +1573,10 @@ def test_ai_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_ai(client, url, param))
+        result = asyncio.run(vuln.test_ai(
+            client, url, param,
+            context=manager.context, hunt_id=hunt_id,
+        ))
         format_output(asdict(result), fmt=fmt, title="AI Prompt Injection Test Result")
 
 

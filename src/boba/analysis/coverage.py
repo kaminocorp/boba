@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from boba.core.context import HuntContext
 from boba.core.models import CoverageSummary
@@ -68,7 +69,7 @@ def get_coverage_gaps(
     gaps = context.get_untested_endpoints(hunt_id, test_types=types)
 
     if host:
-        gaps = [g for g in gaps if host in g.get("url", "")]
+        gaps = [g for g in gaps if urlparse(g.get("url", "")).hostname == host]
 
     return gaps
 
@@ -87,6 +88,6 @@ def _get_known_endpoints(
         endpoint_set.add(d["url"])
 
     if host and directories:
-        endpoint_set = {ep for ep in endpoint_set if host in ep}
+        endpoint_set = {ep for ep in endpoint_set if urlparse(ep).hostname == host}
 
     return endpoint_set

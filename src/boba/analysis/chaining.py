@@ -89,7 +89,7 @@ CHAIN_RULES: list[ChainRule] = [
         min_findings=1,
         combined_severity=Severity.HIGH,
         impact="XSS can steal session cookies, enabling account takeover",
-        evidence_keywords=["reflected", "dom_based", "confirmed"],
+        evidence_keywords=["reflected", "dom_based", "stored", "cookie", "session"],
     ),
     ChainRule(
         name="idor_plus_sqli",
@@ -170,9 +170,9 @@ def detect_chains(
         if matched:
             chains.append(matched)
 
-    # Persist (idempotent)
+    # Persist (idempotent: always clear previous chains, then insert new ones)
+    context.delete_chains(hunt_id)
     if chains:
-        context.delete_chains(hunt_id)
         for chain in chains:
             chain.id = context.upsert_chain(hunt_id, {
                 "title": chain.title,
@@ -268,6 +268,14 @@ def _build_chain(
     # Score the chain — use the rule's combined severity to determine CVSS
     cvss = _chain_cvss(rule.combined_severity)
 
+    # Order findings by attack sequence (matching required_types order)
+    type_order = {t: i for i, t in enumerate(rule.required_types)}
+    fid_to_type = {f["id"]: f.get("finding_type", "") for f in findings}
+    ordered = sorted(
+        finding_ids,
+        key=lambda fid: type_order.get(fid_to_type.get(fid, ""), 999),
+    )
+
     return AttackChain(
         hunt_id="",  # set by caller
         title=rule.description,
@@ -277,7 +285,7 @@ def _build_chain(
         cvss_score=cvss.score,
         cvss_vector=cvss.vector,
         finding_ids=sorted(finding_ids),
-        chain_order=sorted(finding_ids),
+        chain_order=ordered,
         impact=rule.impact,
         tags=[rule.name],
     )

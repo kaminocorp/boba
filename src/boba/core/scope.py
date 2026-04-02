@@ -165,13 +165,29 @@ class ScopeEngine:
             return True
         return url[len(prefix)] in ("/"  , "?", "#", ":")
 
+    @staticmethod
+    def _strip_scheme(url: str) -> str:
+        """Strip scheme from URL for scheme-insensitive prefix matching."""
+        if url.startswith("https://"):
+            return url[8:]
+        if url.startswith("http://"):
+            return url[7:]
+        return url
+
     def _check_url_prefix(self, url: str) -> bool | None:
-        """Check URL prefix rules. Returns None if no rule matched."""
+        """Check URL prefix rules. Returns None if no rule matched.
+
+        Matching is scheme-insensitive: an exclusion for https://example.com/admin
+        also blocks http://example.com/admin.
+        """
+        url_no_scheme = self._strip_scheme(url)
         for prefix in self._url_excludes:
-            if self._url_prefix_match(url, prefix):
+            prefix_no_scheme = self._strip_scheme(prefix)
+            if self._url_prefix_match(url_no_scheme, prefix_no_scheme):
                 return False
         for prefix in self._url_includes:
-            if self._url_prefix_match(url, prefix):
+            prefix_no_scheme = self._strip_scheme(prefix)
+            if self._url_prefix_match(url_no_scheme, prefix_no_scheme):
                 return True
         return None
 

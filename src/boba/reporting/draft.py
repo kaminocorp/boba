@@ -39,7 +39,6 @@ def draft_finding_report(
     ftype = finding.get("finding_type", "unknown")
     url = finding.get("url", "")
     param = finding.get("parameter", "")
-    severity_str = finding.get("severity", "info")
 
     # CVSS scoring
     cvss = auto_score_finding(finding)
@@ -69,7 +68,7 @@ def draft_finding_report(
         hunt_id=hunt_id,
         finding_id=finding_id,
         title=title,
-        severity=Severity(severity_str) if severity_str != cvss.severity.value else cvss.severity,
+        severity=cvss.severity,
         cvss_score=cvss.score,
         cvss_vector=cvss.vector,
         summary=summary,

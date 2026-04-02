@@ -239,6 +239,13 @@ class BaseAdapter(ABC):
                         except Exception as exc:
                             parse_errors += 1
                             logger.debug("%s: failed to parse record: %s", self.TOOL_NAME, exc)
+                else:
+                    parse_errors += 1
+                    logger.warning(
+                        "%s: expected JSON array, got %s",
+                        self.TOOL_NAME,
+                        type(items).__name__,
+                    )
             except json.JSONDecodeError:
                 parse_errors += 1
                 logger.warning(

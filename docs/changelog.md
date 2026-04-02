@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.1](#031--pre-production-hardening) — 5-agent parallel review: CVSS formula fix, CLI coverage integration, scope scheme bypass, IDOR/race/SQLi/CSRF/AI detection improvements, host upsert COALESCE, finding NULL dedup, chain idempotency, report severity consistency. 19 fixes, 0 regressions (579 tests)
 - [0.3.0](#030--intelligence-analysis-chaining--reporting) — V3: analysis engine (coverage, dedup, CVSS, chaining, prioritization), reporting pipeline (draft, format, PoC), 6 new vuln tools (race, redirect, CSRF, mass assignment, reset, AI prompt injection). 4 new tables, 2 new packages, 133 new tests (579 total)
 - [0.2.21](#0221--nuclei-collision--login-deepcopy--idor-empty-body--sqli-confirm) — Nuclei finding collision fix (template_id as unique key), session `login_*()` deep-copy consistency, IDOR empty-body false negative, Nuclei scope mode to "both", hunt_create JSON scope_rules, SQLi time-based confirmation, HuntManager context manager. 8 fixes + 12 new tests (446 total)
 - [0.2.20](#0220--evidence-merge--session-create-deepcopy--fuzz-warnings) — Finding upsert evidence/request_ids merge (was overwrite), `session.create()` deep-copy consistency, fuzz BATTERING_RAM/PITCHFORK missing-payload warnings. 3 fixes + 5 new tests (434 total)
@@ -24,6 +25,59 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.1 — Pre-Production Hardening
+
+**Date:** 2026-04-02
+**Scope:** 19 fixes across all layers, 0 new tests needed (existing 579 pass), 0 regressions
+
+5-agent parallel codebase review across all layers (core, adapters, interaction, tools/vuln, analysis/reporting, CLI/tests). ~50 raw findings triaged down to 19 real, actionable issues. Adapters layer and recon/enum composition came back clean — zero bugs after 22+ rounds of prior hardening.
+
+### Tier 1 — Must-Fix (6 issues)
+
+1. **CVSS 3.1 Changed-scope formula wrong** (`severity.py:51`) — exponent was `15` (spec: `13`) and missing `* 0.9731` ISC factor. Every Changed-scope score (SSRF, XSS, chains) was systematically inflated. Now matches FIRST specification exactly.
+
+2. **CLI test commands never passed context/hunt_id to vuln functions** (`main.py:1299-1542`) — all 11 CLI `test` commands now pass `context=manager.context, hunt_id=hunt_id`, enabling V3 coverage auto-recording. Previously, `analyze coverage` was blind to all CLI-invoked tests.
+
+3. **Finding UNIQUE constraint broken for NULL urls** (`context.py:1132`) — `UNIQUE(hunt_id, finding_type, url, parameter)` didn't deduplicate when `url IS NULL` (SQLite NULL≠NULL). Now coalesces to empty string: `finding.get("url") or ""`.
+
+4. **Stale chains persist when re-run finds zero** (`chaining.py:174`) — `delete_chains()` was inside `if chains:` block. Moved outside so old chains are always cleared before inserting new ones. Idempotency guarantee restored.
+
+5. **Report severity mismatch between object and DB** (`draft.py:72`) — returned `ReportDraft` used original finding severity while DB record used CVSS severity. Now both use CVSS severity as single source of truth.
+
+6. **`upsert_host` overwrites fields with NULL** (`context.py:530`) — no COALESCE guards on nullable fields (ip, status_code, title, webserver, etc.). Re-running a tool that doesn't emit all fields would wipe data from earlier tools. Added COALESCE guards matching `upsert_technology` pattern.
+
+### Tier 2 — Should-Fix (7 issues)
+
+7. **IDOR `_bodies_similar` JSON comparison ignored values** (`vuln.py:1490`) — compared only JSON key structure, causing false positives on every REST API with consistent schema (same keys, different user data). Now falls through to line-based value comparison when structure matches.
+
+8. **SQLi boolean detection hardcoded single-quote payloads** (`vuln.py:658`) — missed numeric-context injection (`?id=1 AND 1=1`). Now iterates over all `BOOLEAN_BASED` payload pairs (string, numeric, double-quote contexts).
+
+9. **Race condition test flagged any dynamic endpoint** (`vuln.py:976`) — body divergence and `success_count > 1` set `vulnerable=True` on natural variance (timestamps, CSRF tokens). Now body divergence and multiple successes are evidence-only; only status code divergence sets `vulnerable=True`.
+
+10. **URL prefix exclusion bypass via scheme mismatch** (`scope.py:168`) — exclusion `https://example.com/admin` didn't catch `http://example.com/admin`. Added scheme-insensitive matching: strips scheme before prefix comparison.
+
+11. **`chain_order` was sorted IDs, not attack sequence** (`chaining.py:280`) — `sorted(finding_ids)` didn't represent exploitation order. Now orders findings by `required_types` sequence from the chain rule.
+
+12. **Coverage host filter used substring match** (`coverage.py:71`) — `host in url` matched `badapi.example.com` for filter `api.example.com`. Now uses `urlparse(url).hostname == host` for exact matching.
+
+13. **`test race --session` silently ignored missing sessions** (`main.py:1434`) — fell back to unauthenticated test. Now errors out consistently with other test commands.
+
+### Tier 3 — Nice-to-Fix (6 issues)
+
+14. **CSRF test didn't strip body tokens** (`vuln.py:1122`) — only stripped CSRF headers. Now parses JSON and form-encoded bodies to remove known CSRF token parameters before the "no token" test.
+
+15. **XSS encoding-bypass payloads double-encoded** (`xss.py:36`) — `%3Cscript%3E` was re-encoded to `%253C` by `_inject_param`. Stored decoded so single encoding produces intended form.
+
+16. **JSON_ARRAY parser silently dropped non-list JSON** (`base.py:232`) — returned 0 records AND 0 parse errors. Now logs warning and increments `parse_errors`.
+
+17. **`xss_session_hijack` chain matched too broadly** (`chaining.py:92`) — keyword `"confirmed"` matched all confirmed XSS. Replaced with specific indicators: `"stored"`, `"cookie"`, `"session"`.
+
+18. **`upsert_report` always INSERTed, creating duplicates** (`context.py:1534`) — added `UNIQUE(hunt_id, finding_id, chain_id)` constraint and `ON CONFLICT DO UPDATE` clause.
+
+19. **`report format` and `report show` didn't scope by hunt_id** (`main.py:1188,1280`) — reports accessible across hunt boundaries. Now validates `report["hunt_id"] == hunt_id`. Also: invalid platform names now error instead of silently falling back to markdown.
 
 ---
 

@@ -48,7 +48,7 @@ def calculate_cvss(
         impact = 6.42 * isc_base
     else:
         pr_weights = _PR_CHANGED
-        impact = 7.52 * (isc_base - 0.029) - 3.25 * (isc_base - 0.02) ** 15
+        impact = 7.52 * (isc_base - 0.029) - 3.25 * (isc_base * 0.9731 - 0.02) ** 13
 
     # Exploitability sub-score
     exploitability = (

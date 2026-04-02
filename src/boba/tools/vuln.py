@@ -654,58 +654,58 @@ async def test_sqli(
         if vulnerable:
             break
 
-        # Boolean-based detection
-        true_payload = "' AND '1'='1"
-        false_payload = "' AND '1'='2"
-
-        resp_true = await http_client.request(
-            method=method,
-            url=_inject_param(url, param_name, f"{default_val}{true_payload}"),
-            headers=headers,
-            cookies=cookies,
-            source="test_sqli",
-            tags=["sqli", "boolean_true"],
-        )
-        resp_false = await http_client.request(
-            method=method,
-            url=_inject_param(url, param_name, f"{default_val}{false_payload}"),
-            headers=headers,
-            cookies=cookies,
-            source="test_sqli",
-            tags=["sqli", "boolean_false"],
-        )
-        request_ids.extend([resp_true.request_id, resp_false.request_id])
-
-        # If true/false conditions produce different response lengths, likely SQLi.
-        # Use both absolute and relative thresholds to catch small and large responses.
-        # Guards: (1) true-condition must match baseline (true payload "passes through"),
-        # (2) false-condition must NOT match baseline (false payload causes different
-        # output). Without both guards, dynamic content (ads, CSRF tokens, timestamps)
-        # can cause natural length variance that triggers false positives.
-        len_diff = abs(len(resp_true.body) - len(resp_false.body))
-        baseline_len = max(len(resp_baseline.body), 1)
-        relative_diff = len_diff / baseline_len
-        true_matches_baseline = _bodies_similar(resp_true.body, resp_baseline.body)
-        false_matches_baseline = _bodies_similar(resp_false.body, resp_baseline.body)
-        if (
-            resp_true.status_code == resp_false.status_code
-            and (len_diff >= 20 or relative_diff >= 0.05)
-            and len_diff > 0
-            and resp_true.status_code == resp_baseline.status_code
-            and true_matches_baseline
-            and not false_matches_baseline
-        ):
-            vulnerable = True
-            confidence = Confidence.LIKELY
-            evidence.append(
-                {
-                    "type": "boolean_based",
-                    "param": param_name,
-                    "true_length": len(resp_true.body),
-                    "false_length": len(resp_false.body),
-                    "diff": len_diff,
-                }
+        # Boolean-based detection — try multiple payload styles
+        # (single-quote string context AND numeric context)
+        boolean_pairs = list(zip(sqli_payloads.BOOLEAN_BASED[::2],
+                                 sqli_payloads.BOOLEAN_BASED[1::2]))
+        for true_payload, false_payload in boolean_pairs:
+            resp_true = await http_client.request(
+                method=method,
+                url=_inject_param(url, param_name, f"{default_val}{true_payload}"),
+                headers=headers,
+                cookies=cookies,
+                source="test_sqli",
+                tags=["sqli", "boolean_true"],
             )
+            resp_false = await http_client.request(
+                method=method,
+                url=_inject_param(url, param_name, f"{default_val}{false_payload}"),
+                headers=headers,
+                cookies=cookies,
+                source="test_sqli",
+                tags=["sqli", "boolean_false"],
+            )
+            request_ids.extend([resp_true.request_id, resp_false.request_id])
+
+            # If true/false conditions produce different response lengths, likely SQLi.
+            # Guards: (1) true-condition must match baseline, (2) false must NOT.
+            len_diff = abs(len(resp_true.body) - len(resp_false.body))
+            baseline_len = max(len(resp_baseline.body), 1)
+            relative_diff = len_diff / baseline_len
+            true_matches_baseline = _bodies_similar(resp_true.body, resp_baseline.body)
+            false_matches_baseline = _bodies_similar(resp_false.body, resp_baseline.body)
+            if (
+                resp_true.status_code == resp_false.status_code
+                and (len_diff >= 20 or relative_diff >= 0.05)
+                and len_diff > 0
+                and resp_true.status_code == resp_baseline.status_code
+                and true_matches_baseline
+                and not false_matches_baseline
+            ):
+                vulnerable = True
+                confidence = Confidence.LIKELY
+                evidence.append(
+                    {
+                        "type": "boolean_based",
+                        "param": param_name,
+                        "true_payload": true_payload,
+                        "false_payload": false_payload,
+                        "true_length": len(resp_true.body),
+                        "false_length": len(resp_false.body),
+                        "diff": len_diff,
+                    }
+                )
+                break  # Found boolean SQLi with this payload pair
 
         # Time-based detection — only if not already confirmed via error/boolean.
         # Uses multiple baseline samples to reduce false positives from network jitter.
@@ -988,15 +988,16 @@ async def test_race(
             "unique_count": len(unique_statuses),
         })
     elif unique_bodies > 1:
-        vulnerable = True
-        confidence = Confidence.POSSIBLE
+        # Body divergence alone is evidence-only (timestamps, CSRF tokens, etc.
+        # cause natural variance). Only status divergence confirms a race.
         evidence.append({
             "type": "body_divergence",
             "unique_bodies": unique_bodies,
             "total_requests": concurrency,
         })
 
-    # Check for success count — multiple successes on one-time actions
+    # Multiple successes — informational evidence, not a standalone signal
+    # (most endpoints return 200 for all requests regardless of serialization)
     success_count = sum(1 for s in status_codes if 200 <= s < 300)
     if success_count > 1:
         evidence.append({
@@ -1004,9 +1005,6 @@ async def test_race(
             "success_count": success_count,
             "total_requests": concurrency,
         })
-        if not vulnerable:
-            vulnerable = True
-            confidence = Confidence.POSSIBLE
 
     result = VulnTestResult(
         test_type="race",
@@ -1123,10 +1121,30 @@ async def test_csrf(
     # Strip known CSRF headers
     clean_headers = {k: v for k, v in headers.items()
                      if k.lower() not in ("x-csrf-token", "x-xsrf-token")}
+    # Strip known CSRF token params from request body
+    clean_body = body
+    if clean_body:
+        try:
+            body_obj = _json_mod.loads(clean_body)
+            if isinstance(body_obj, dict):
+                token_names_lower = {n.lower() for n in csrf_payloads.TOKEN_PARAM_NAMES}
+                body_obj = {k: v for k, v in body_obj.items()
+                            if k.lower() not in token_names_lower}
+                clean_body = _json_mod.dumps(body_obj)
+        except (ValueError, TypeError):
+            # Form-encoded body — strip token params
+            try:
+                params = parse_qs(clean_body, keep_blank_values=True)
+                token_names_lower = {n.lower() for n in csrf_payloads.TOKEN_PARAM_NAMES}
+                params = {k: v for k, v in params.items()
+                          if k.lower() not in token_names_lower}
+                clean_body = urlencode(params, doseq=True) if params else ""
+            except Exception:
+                pass
 
     resp_no_token = await http_client.request(
         method=method, url=url, headers=clean_headers, cookies=cookies,
-        body=body, source="test_csrf", tags=["csrf", "no_token"],
+        body=clean_body, source="test_csrf", tags=["csrf", "no_token"],
     )
     request_ids.append(resp_no_token.request_id)
 
@@ -1418,16 +1436,18 @@ async def test_ai(
                 })
                 break
 
-        # Check for system prompt leak indicators
+        # Check for system prompt leak indicators (weighted scoring)
         if not vulnerable:
-            leak_count = sum(1 for ind in ai_payloads.LEAK_INDICATORS if ind in body_lower)
-            if leak_count >= 3:
+            strong = sum(2 for ind in ai_payloads.LEAK_INDICATORS_STRONG if ind in body_lower)
+            weak = sum(1 for ind in ai_payloads.LEAK_INDICATORS_WEAK if ind in body_lower)
+            leak_score = strong + weak
+            if leak_score >= 4:
                 vulnerable = True
                 confidence = Confidence.LIKELY
                 evidence.append({
                     "type": "system_prompt_leak",
                     "payload": payload,
-                    "leak_indicators_matched": leak_count,
+                    "leak_score": leak_score,
                     "request_id": resp.request_id,
                 })
 
@@ -1487,7 +1507,8 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
     if len_ratio < threshold:
         return False
 
-    # Try JSON-aware comparison: if both parse as JSON, compare key structure
+    # Try JSON-aware comparison: if both parse as JSON, compare structure AND values.
+    # Key-only comparison would cause false positives (same schema, different user data).
     import json as _json
 
     try:
@@ -1496,9 +1517,11 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
         keys_a = _extract_json_keys(json_a)
         keys_b = _extract_json_keys(json_b)
         if keys_a and keys_b:
-            # Same JSON structure = similar (values differ, shape matches)
             key_overlap = len(keys_a & keys_b) / max(len(keys_a | keys_b), 1)
-            return key_overlap >= threshold
+            if key_overlap < threshold:
+                return False
+            # Same structure — fall through to line-based value comparison
+            # to distinguish identical data from different data with same shape.
     except (ValueError, TypeError):
         pass
 

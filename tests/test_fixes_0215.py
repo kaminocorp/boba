@@ -177,9 +177,11 @@ class TestBodiesSimilarThreshold:
         # key overlap: {a, b, c} / {a, b, c, d, extra} = 3/5 = 0.6 → not similar at 0.7
         assert _bodies_similar(body_a, body_b) is False
 
-        # Same structure = 100% overlap → similar
+        # Same structure but different values → falls through to line-based
+        # comparison which detects value differences → not similar.
+        # Prevents IDOR false positives on same-schema different-user data.
         body_c = json.dumps({"a": 9, "b": 8, "c": 7, "d": 0}).encode()
-        assert _bodies_similar(body_a, body_c) is True
+        assert _bodies_similar(body_a, body_c) is False
 
 
 # ---------------------------------------------------------------------------

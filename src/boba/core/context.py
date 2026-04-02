@@ -356,7 +356,8 @@ CREATE TABLE IF NOT EXISTS reports (
     submitted_at        TEXT,
     status              TEXT NOT NULL DEFAULT 'draft',
     created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL
+    updated_at          TEXT NOT NULL,
+    UNIQUE(hunt_id, finding_id, chain_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_hunt   ON reports(hunt_id);
@@ -528,16 +529,17 @@ class HuntContext:
                  first_seen_at, last_seen_at, last_checked_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hunt_id, host, port, scheme) DO UPDATE SET
-                ip = excluded.ip,
-                url = excluded.url,
-                status_code = excluded.status_code,
-                title = excluded.title,
-                webserver = excluded.webserver,
-                content_length = excluded.content_length,
-                content_type = excluded.content_type,
-                technologies = excluded.technologies,
-                tls_version = excluded.tls_version,
-                final_url = excluded.final_url,
+                ip = COALESCE(excluded.ip, hosts.ip),
+                url = COALESCE(excluded.url, hosts.url),
+                status_code = COALESCE(excluded.status_code, hosts.status_code),
+                title = COALESCE(excluded.title, hosts.title),
+                webserver = COALESCE(excluded.webserver, hosts.webserver),
+                content_length = COALESCE(excluded.content_length, hosts.content_length),
+                content_type = COALESCE(excluded.content_type, hosts.content_type),
+                technologies = CASE WHEN excluded.technologies = '[]'
+                    THEN hosts.technologies ELSE excluded.technologies END,
+                tls_version = COALESCE(excluded.tls_version, hosts.tls_version),
+                final_url = COALESCE(excluded.final_url, hosts.final_url),
                 last_seen_at = excluded.last_seen_at,
                 last_checked_at = excluded.last_checked_at""",
             (
@@ -1129,9 +1131,9 @@ class HuntContext:
                 finding.get("severity", "info"),
                 finding["title"],
                 finding.get("description"),
-                finding.get("url"),
+                finding.get("url") or "",
                 finding.get("endpoint"),
-                finding.get("parameter", ""),
+                finding.get("parameter") or "",
                 json.dumps(finding.get("evidence")) if finding.get("evidence") else None,
                 json.dumps(finding.get("request_ids", [])),
                 finding.get("tool_run_id"),
@@ -1541,7 +1543,20 @@ class HuntContext:
                  remediation, evidence_refs, request_ids,
                  platform, platform_report_id, platform_status,
                  submitted_at, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, finding_id, chain_id) DO UPDATE SET
+                title = excluded.title,
+                severity = excluded.severity,
+                cvss_score = excluded.cvss_score,
+                cvss_vector = excluded.cvss_vector,
+                summary = excluded.summary,
+                steps = excluded.steps,
+                impact = excluded.impact,
+                remediation = excluded.remediation,
+                evidence_refs = excluded.evidence_refs,
+                request_ids = excluded.request_ids,
+                status = excluded.status,
+                updated_at = excluded.updated_at""",
             (
                 hunt_id,
                 report.get("finding_id"),

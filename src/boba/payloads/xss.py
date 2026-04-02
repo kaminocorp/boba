@@ -32,8 +32,11 @@ EVENT_HANDLERS: list[str] = [
 ]
 
 # Encoding bypass payloads
+# Note: URL-encoded payloads are stored decoded here — _inject_param will
+# single-encode them so they arrive at the server in their intended form.
+# HTML entity and JS hex escape payloads test server-side decode-before-reflect.
 ENCODING_BYPASS: list[str] = [
-    "%3Cscript%3Ealert(1)%3C/script%3E",
+    "<script>alert(1)</script>",  # re-encoded to %3C... by _inject_param
     "&#60;script&#62;alert(1)&#60;/script&#62;",
     "\\x3cscript\\x3ealert(1)\\x3c/script\\x3e",
     "<scr<script>ipt>alert(1)</scr</script>ipt>",
