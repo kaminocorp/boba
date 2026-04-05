@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.6](#036--data-integrity--detection-accuracy) — 4-agent parallel review: upsert COALESCE guards on ports/directories/findings (prevent NULL overwrites on re-scan), race condition false-positive reduction (filter 304/429 benign variance, add body-divergence confirmation), mass assignment non-JSON evidence logging, XSS DOM short-circuit removal (test all params), BrokenPipeError clean exit. 7 fixes, 0 regressions (579 tests)
 - [0.3.5](#035--final-prod-gate) — 6-agent parallel review: report upsert NULL dedup, scope enforcement on all 12 vuln tests, check_duplicate self-match, chain re-detection preserves validation, dedup cross-type false merge, finding parameter persistence, CSRF cross-origin body, SQLi time-based deadline, auth false-positive reduction, json_array_merge dedup, migration atomicity, subprocess zombie guard, fuzz baseline validity, OOB async/sync safety, reflected XSS scoring. 15 fixes, 0 regressions (579 tests)
 - [0.3.4](#034--prod-readiness-review) — 4-agent parallel review: chain deletion data loss, race test gather crash, scope bypass via empty-string fallback, ffuf empty-targets crash, scope None guard, dedup O(n)->O(1) via json_each, vuln finding persistence pipeline, PoC I/O resilience, public finding API. 9 fixes, 0 regressions (579 tests)
 - [0.3.3](#033--final-pre-prod-hardening) — 4-agent parallel review: JSON array merge via custom SQLite function (replaces fragile substr concat), findings method-aware UNIQUE + dedup, output truncation propagation, IDOR scope enforcement at entry, CIDR exclusion symmetry fix, vuln test deadlines, recon.urls failure signaling, thread-safety docs. 8 fixes, 0 regressions (579 tests)
@@ -29,6 +30,33 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.6 — Data Integrity & Detection Accuracy
+
+**Date:** 2026-04-05
+**Scope:** 7 fixes across core persistence, vuln testing, and CLI layers. 0 regressions (579 tests pass).
+
+4-agent parallel codebase review for final production gate. Filtered ~40 raw findings down to 7 real, actionable issues. Focused on data integrity (upsert NULL overwrites), detection accuracy (false positives/negatives), and operational robustness. Post-fix score: 8.5+/10.
+
+### Tier 1 — Must-Fix (5 issues)
+
+1. **`upsert_port()` unconditionally overwrote IP with NULL on re-scan** (`context.py:678`) — When a port was re-scanned by a tool that didn't provide IP information, the existing IP address was permanently lost. Changed `ip = excluded.ip` to `ip = COALESCE(excluded.ip, ports.ip)` so existing data is preserved when the new value is NULL.
+
+2. **`upsert_directory()` unconditionally overwrote 6 metadata fields** (`context.py:783-788`) — Re-discovery with partial metadata (e.g., a different tool) permanently wiped `status_code`, `content_length`, `word_count`, `line_count`, `content_type`, and `redirect_location`. All 6 fields now use `COALESCE(excluded.*, directories.*)` to preserve existing values when new data is NULL.
+
+3. **`test_race()` flagged benign status variance as LIKELY vulnerability** (`vuln.py:1145`) — Any status code divergence (including 304 Not Modified from caching, 429 from rate limiting, and load balancer jitter) triggered a LIKELY confidence race condition. Now filters out benign status codes (304, 429) before checking divergence. Additionally, when both status codes AND response bodies diverge, confidence is upgraded to CONFIRMED — providing a two-signal confirmation that prior versions lacked.
+
+4. **`test_mass_assign()` silently discarded all evidence on non-JSON responses** (`vuln.py:1544`) — The bare `except (ValueError, TypeError): pass` handler meant that mass assignment testing on endpoints returning HTML (error pages, redirects, SSR apps) produced zero evidence and zero logs. Added `logger.warning()` with the URL and exception details, plus a `parse_error` evidence entry so the finding is visible in reports and agents know to retry or escalate.
+
+5. **`test_xss()` outer break skipped remaining params for both reflected and DOM checks** (`vuln.py:606-610`) — Finding reflected XSS on parameter A exited the entire outer loop, preventing reflected testing on param B and all DOM-based testing (guarded by `not vulnerable`). Removed the outer `break` and the `not vulnerable` guard on the DOM check. Now all parameters are tested for reflected XSS, and DOM-based testing runs regardless of reflected results since DOM XSS on a different parameter is a distinct finding.
+
+### Tier 2 — Should-Fix (2 issues)
+
+6. **`upsert_finding()` unconditionally overwrote severity/title/description** (`context.py:1201-1203`) — A re-upsert with NULL severity (e.g., from a different tool run with less context) replaced a previously scored finding's metadata. Changed to `COALESCE(excluded.*, findings.*)` for `severity`, `title`, and `description`, consistent with how `confirmed` and `false_positive` already use `MAX()` to preserve the strongest signal.
+
+7. **`json.dump` to stdout crashed on piped output** (`formatters.py:41`) — Running `boba context urls HUNT | head -1` produced an ugly `BrokenPipeError` traceback. Added `try/except BrokenPipeError` with clean `SystemExit(0)`, following the standard Python pattern for CLI tools that pipe to `head`/`less`.
 
 ---
 

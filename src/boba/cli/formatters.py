@@ -38,8 +38,13 @@ def format_output(
 
 
 def _print_json(data: list[dict] | dict) -> None:
-    json.dump(data, sys.stdout, indent=2, default=str)
-    sys.stdout.write("\n")
+    try:
+        json.dump(data, sys.stdout, indent=2, default=str)
+        sys.stdout.write("\n")
+    except BrokenPipeError:
+        # Piped to head/less/etc. that closed early — exit cleanly.
+        sys.stderr.close()
+        raise SystemExit(0)
 
 
 def _print_table(

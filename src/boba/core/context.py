@@ -675,7 +675,7 @@ class HuntContext:
             """INSERT INTO ports (hunt_id, host, ip, port, protocol, first_seen_at, last_seen_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hunt_id, host, port, protocol) DO UPDATE SET
-                ip = excluded.ip,
+                ip = COALESCE(excluded.ip, ports.ip),
                 last_seen_at = excluded.last_seen_at""",
             (
                 hunt_id,
@@ -780,12 +780,12 @@ class HuntContext:
                  first_seen_at, last_seen_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hunt_id, url) DO UPDATE SET
-                status_code = excluded.status_code,
-                content_length = excluded.content_length,
-                word_count = excluded.word_count,
-                line_count = excluded.line_count,
-                content_type = excluded.content_type,
-                redirect_location = excluded.redirect_location,
+                status_code = COALESCE(excluded.status_code, directories.status_code),
+                content_length = COALESCE(excluded.content_length, directories.content_length),
+                word_count = COALESCE(excluded.word_count, directories.word_count),
+                line_count = COALESCE(excluded.line_count, directories.line_count),
+                content_type = COALESCE(excluded.content_type, directories.content_type),
+                redirect_location = COALESCE(excluded.redirect_location, directories.redirect_location),
                 last_seen_at = excluded.last_seen_at""",
             (
                 hunt_id,
@@ -1198,9 +1198,9 @@ class HuntContext:
                  template_id, tags, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hunt_id, finding_type, url, method, parameter) DO UPDATE SET
-                severity = excluded.severity,
-                title = excluded.title,
-                description = excluded.description,
+                severity = COALESCE(excluded.severity, findings.severity),
+                title = COALESCE(excluded.title, findings.title),
+                description = COALESCE(excluded.description, findings.description),
                 evidence = json_array_merge(findings.evidence, excluded.evidence),
                 request_ids = json_array_merge(findings.request_ids, excluded.request_ids),
                 tool_run_id = excluded.tool_run_id,

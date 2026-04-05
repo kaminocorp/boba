@@ -603,11 +603,9 @@ async def test_xss(
                     }
                 )
 
-        if vulnerable:
-            break
-
-    # DOM-based XSS check via browser
-    if check_dom and browser and not vulnerable:
+    # DOM-based XSS check via browser (runs for all params, even if reflected was found,
+    # because DOM-based XSS on param B is a distinct finding from reflected on param A).
+    if check_dom and browser:
         for param_name in test_params:
             for canary in xss_payloads.DOM_CANARY:
                 test_url = _inject_param(url, param_name, canary)
@@ -1142,14 +1140,38 @@ async def test_race(
     vulnerable = False
     confidence = Confidence.POSSIBLE
 
-    if len(unique_statuses) > 1:
+    # Filter out benign status variance: 304 (caching) and 429 (rate limiting)
+    # are expected under concurrency and do not indicate a race condition.
+    meaningful_statuses = {s for s in status_codes if s not in (304, 429)}
+    meaningful_divergence = len(meaningful_statuses) > 1
+
+    if meaningful_divergence:
         vulnerable = True
         confidence = Confidence.LIKELY
         evidence.append(
             {
                 "type": "status_divergence",
                 "status_codes": status_codes,
-                "unique_count": len(unique_statuses),
+                "unique_count": len(meaningful_statuses),
+            }
+        )
+        if unique_bodies > 1:
+            # Both status AND body diverge — strongest signal.
+            confidence = Confidence.CONFIRMED
+            evidence.append(
+                {
+                    "type": "body_divergence",
+                    "unique_bodies": unique_bodies,
+                    "total_requests": concurrency,
+                }
+            )
+    elif len(unique_statuses) > 1:
+        # Only cache/rate-limit variance — informational, not a vulnerability.
+        evidence.append(
+            {
+                "type": "benign_status_variance",
+                "status_codes": status_codes,
+                "note": "Only 304/429 variance detected (caching or rate limiting)",
             }
         )
     elif unique_bodies > 1:
@@ -1541,8 +1563,20 @@ async def test_mass_assign(
                                 "actual_value": actual,
                             }
                         )
-    except (ValueError, TypeError):
-        pass
+    except (ValueError, TypeError) as exc:
+        logger.warning(
+            "Mass assignment: could not parse response from %s as JSON (%s). "
+            "Non-JSON endpoints require manual review.",
+            url,
+            exc,
+        )
+        evidence.append(
+            {
+                "type": "parse_error",
+                "note": f"Response is not JSON ({exc}); mass assignment not verifiable",
+                "status_code": resp_after.status_code,
+            }
+        )
 
     result = VulnTestResult(
         test_type="mass_assign",
