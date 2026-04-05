@@ -283,14 +283,20 @@ class HttpClient:
 
         results: list[dict[str, Any]] = []
 
-        # Send an unfuzzed baseline request — substitute empty strings for all
-        # marker positions so the server sees a "normal" request rather than
-        # literal §marker§ characters (which would produce a meaningless baseline).
-        _marker_re = re.compile(rf"{re.escape(FUZZ_MARKER)}[^{re.escape(FUZZ_MARKER)}]*{re.escape(FUZZ_MARKER)}")
-        baseline_url = _marker_re.sub("", url)
-        baseline_body = _marker_re.sub("", body) if body else body
+        # Send an unfuzzed baseline request — substitute the first payload of each
+        # position as a representative value, so the baseline URL/body stays structurally
+        # valid (e.g., /api/§id§/details → /api/1/details, not /api//details).
+        _marker_re = re.compile(rf"{re.escape(FUZZ_MARKER)}([^{re.escape(FUZZ_MARKER)}]*){re.escape(FUZZ_MARKER)}")
+
+        def _baseline_sub(match: re.Match) -> str:
+            pos_name = match.group(1)
+            pos_payloads = payloads.get(pos_name, [])
+            return pos_payloads[0] if pos_payloads else ""
+
+        baseline_url = _marker_re.sub(_baseline_sub, url)
+        baseline_body = _marker_re.sub(_baseline_sub, body) if body else body
         baseline_headers = (
-            {k: _marker_re.sub("", v) for k, v in headers.items()} if headers else headers
+            {k: _marker_re.sub(_baseline_sub, v) for k, v in headers.items()} if headers else headers
         )
         baseline_resp = await self.request(
             method=method,

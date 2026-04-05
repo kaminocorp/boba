@@ -303,6 +303,7 @@ async def test_ssrf(
     session: SessionState | None = None,
     oob_manager: OOBManager | None = None,
     poll_timeout_seconds: int = 10,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
     max_test_seconds: float = 300,
@@ -313,6 +314,12 @@ async def test_ssrf(
 
     max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="ssrf", vulnerable=False,
+            title=f"SSRF on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     payloads = payloads or ssrf_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
@@ -480,6 +487,7 @@ async def test_xss(
     check_dom: bool = False,
     browser: Any = None,
     oob_manager: OOBManager | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
     max_test_seconds: float = 300,
@@ -492,6 +500,12 @@ async def test_xss(
 
     max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="xss", vulnerable=False,
+            title=f"XSS on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     payloads = payloads or xss_payloads.BASIC
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
@@ -632,8 +646,9 @@ async def test_xss(
         if vulnerable
         else [],
     )
-    _persist_finding(context, hunt_id, result, url, method)
     test_params = params or {"q": ""}
+    param_str = ",".join(test_params.keys())
+    _persist_finding(context, hunt_id, result, url, method, param_str)
     for pname in test_params:
         _record_coverage(context, hunt_id, url, method, pname, "xss")
     return result
@@ -646,6 +661,7 @@ async def test_sqli(
     params: dict[str, str] | None = None,
     session: SessionState | None = None,
     payloads: list[str] | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
     max_test_seconds: float = 300,
@@ -659,6 +675,12 @@ async def test_sqli(
 
     max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="sqli", vulnerable=False,
+            title=f"SQL Injection on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     payloads = payloads or sqli_payloads.ERROR_BASED
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
@@ -779,6 +801,9 @@ async def test_sqli(
         # Time-based detection — only if not already confirmed via error/boolean.
         # Uses multiple baseline samples to reduce false positives from network jitter.
         if not vulnerable:
+            if asyncio.get_event_loop().time() > _deadline:
+                logger.warning("test_sqli timed out before time-based phase on %s", url)
+                break
             time_payloads = (
                 sqli_payloads.TIME_BASED_MYSQL
                 + sqli_payloads.TIME_BASED_POSTGRES
@@ -801,6 +826,9 @@ async def test_sqli(
             baseline_median = sorted(baseline_samples)[len(baseline_samples) // 2]
 
             for payload in time_payloads:
+                if asyncio.get_event_loop().time() > _deadline:
+                    logger.warning("test_sqli time-based phase timed out on %s", url)
+                    break
                 test_url = _inject_param(url, param_name, f"{default_val}{payload}")
                 resp_time = await http_client.request(
                     method=method,
@@ -861,8 +889,9 @@ async def test_sqli(
         if vulnerable
         else [],
     )
-    _persist_finding(context, hunt_id, result, url, method)
     test_params = params or {"id": "1"}
+    param_str = ",".join(test_params.keys())
+    _persist_finding(context, hunt_id, result, url, method, param_str)
     for pname in test_params:
         _record_coverage(context, hunt_id, url, method, pname, "sqli")
     return result
@@ -873,6 +902,7 @@ async def test_auth(
     endpoint: str,
     session: SessionState | None = None,
     jwt_token: str | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
 ) -> VulnTestResult:
@@ -882,6 +912,12 @@ async def test_auth(
     2. JWT none algorithm: re-sign with alg=none
     3. JWT claim manipulation: modify role/admin claims
     """
+    if scope_engine and not scope_engine.is_in_scope(endpoint):
+        return VulnTestResult(
+            test_type="auth", vulnerable=False,
+            title=f"Auth bypass on {endpoint}",
+            description=f"Skipped: {endpoint} is out of scope",
+        )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
     vulnerable = False
@@ -897,15 +933,27 @@ async def test_auth(
     request_ids.append(resp_noauth.request_id)
 
     if 200 <= resp_noauth.status_code < 400:
-        vulnerable = True
-        confidence = Confidence.CONFIRMED
-        evidence.append(
-            {
-                "type": "no_auth_access",
-                "status_code": resp_noauth.status_code,
-                "note": "Endpoint accessible without any authentication",
-            }
-        )
+        # Only flag as vulnerable if we have a session to compare against
+        # (otherwise we can't distinguish public endpoints from broken auth)
+        # or if the endpoint looks admin-like.
+        if session or _ADMIN_RE.search(endpoint):
+            vulnerable = True
+            confidence = Confidence.LIKELY if not session else Confidence.POSSIBLE
+            evidence.append(
+                {
+                    "type": "no_auth_access",
+                    "status_code": resp_noauth.status_code,
+                    "note": "Endpoint accessible without any authentication",
+                }
+            )
+        else:
+            evidence.append(
+                {
+                    "type": "no_auth_access",
+                    "status_code": resp_noauth.status_code,
+                    "note": "Endpoint accessible without auth — may be intentionally public",
+                }
+            )
 
     # Test 2: JWT manipulation (if token provided)
     if jwt_token:
@@ -960,8 +1008,8 @@ async def test_auth(
             # Invalid JWT format — skip JWT tests
             logger.debug("JWT manipulation skipped for %s: %s", endpoint, exc)
 
-    # Test 3: With valid session but accessing admin-like endpoints
-    if session and not vulnerable:
+    # Test 3: With valid session — compare authed vs unauthed to confirm no-auth finding
+    if session:
         resp_auth = await http_client.request(
             method="GET",
             url=endpoint,
@@ -973,9 +1021,26 @@ async def test_auth(
         )
         request_ids.append(resp_auth.request_id)
 
-        # If regular user can access, check if it looks like an admin endpoint
         if 200 <= resp_auth.status_code < 400:
-            if _ADMIN_RE.search(endpoint):
+            # Upgrade no-auth finding if authed response differs from unauthed
+            # (meaning the endpoint IS auth-aware but doesn't enforce it)
+            if 200 <= resp_noauth.status_code < 400:
+                if not _bodies_similar(resp_auth.body, resp_noauth.body):
+                    # Different content with vs without auth — endpoint is auth-aware
+                    # but still returns 200 without auth = broken auth
+                    vulnerable = True
+                    confidence = Confidence.CONFIRMED
+                    evidence.append(
+                        {
+                            "type": "auth_aware_but_unenforced",
+                            "authed_status": resp_auth.status_code,
+                            "unauthed_status": resp_noauth.status_code,
+                            "note": "Authed and unauthed responses differ, but endpoint allows unauthenticated access",
+                        }
+                    )
+
+            # Check if it looks like an admin endpoint
+            if _ADMIN_RE.search(endpoint) and not vulnerable:
                 vulnerable = True
                 confidence = Confidence.LIKELY
                 evidence.append(
@@ -1004,8 +1069,10 @@ async def test_auth(
         if vulnerable
         else [],
     )
-    _persist_finding(context, hunt_id, result, endpoint)
-    _record_coverage(context, hunt_id, endpoint, "GET", "", "auth")
+    # Determine the most descriptive "parameter" for finding persistence
+    auth_param = "jwt" if jwt_token else ""
+    _persist_finding(context, hunt_id, result, endpoint, "GET", auth_param)
+    _record_coverage(context, hunt_id, endpoint, "GET", auth_param, "auth")
     return result
 
 
@@ -1025,6 +1092,12 @@ async def test_race(
     Sends `concurrency` identical requests simultaneously and compares responses.
     Divergent responses indicate a potential race condition.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="race_condition", vulnerable=False,
+            title=f"Race condition on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
     headers = session.headers if session else {}
@@ -1131,6 +1204,7 @@ async def test_redirect(
     param: str,
     payloads: list[str] | None = None,
     session: SessionState | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
 ) -> VulnTestResult:
@@ -1139,6 +1213,12 @@ async def test_redirect(
     Injects redirect payloads into the specified parameter and checks if
     the response redirects to an external host.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="redirect", vulnerable=False,
+            title=f"Open redirect on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     payloads = payloads or redirect_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
@@ -1218,6 +1298,7 @@ async def test_csrf(
     url: str,
     method: str = "POST",
     body: str | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
 ) -> VulnTestResult:
@@ -1225,6 +1306,12 @@ async def test_csrf(
 
     Checks: no CSRF token required, invalid token accepted, cross-origin accepted.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="csrf", vulnerable=False,
+            title=f"CSRF on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
     headers = dict(session.headers) if session else {}
@@ -1316,7 +1403,7 @@ async def test_csrf(
         url=url,
         headers=cross_origin_headers,
         cookies=cookies,
-        body=body,
+        body=clean_body,
         source="test_csrf",
         tags=["csrf", "cross_origin"],
     )
@@ -1362,6 +1449,7 @@ async def test_mass_assign(
     method: str = "PUT",
     base_body: dict | None = None,
     extra_fields: dict | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
 ) -> VulnTestResult:
@@ -1369,6 +1457,12 @@ async def test_mass_assign(
 
     Sends extra fields (isAdmin, role, etc.) and checks if they persist.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="mass_assign", vulnerable=False,
+            title=f"Mass assignment on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
     headers = dict(session.headers) if session else {}
@@ -1477,6 +1571,7 @@ async def test_reset(
     email_param: str = "email",
     test_email: str = "test@example.com",
     session: SessionState | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
 ) -> VulnTestResult:
@@ -1484,6 +1579,12 @@ async def test_reset(
 
     Checks: host header injection, rate limiting.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="reset", vulnerable=False,
+            title=f"Password reset flaw on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
     headers = dict(session.headers) if session else {}
@@ -1577,6 +1678,7 @@ async def test_ai(
     param: str,
     session: SessionState | None = None,
     payloads: list[str] | None = None,
+    scope_engine: Any | None = None,
     context: HuntContext | None = None,
     hunt_id: str = "",
     max_test_seconds: float = 300,
@@ -1587,6 +1689,12 @@ async def test_ai(
 
     max_test_seconds caps total wall-clock time to prevent hangs on slow targets.
     """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="ai", vulnerable=False,
+            title=f"Prompt injection on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
     payloads = payloads or ai_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []

@@ -57,7 +57,18 @@ def _json_array_merge(a: str | None, b: str | None) -> str:
 
     arr_a = _parse_array(a)
     arr_b = _parse_array(b)
-    merged = arr_a + arr_b
+    # Deduplicate: preserve order, skip items already in arr_a.
+    # For unhashable items (dicts), fall back to membership check.
+    seen: set = set()
+    merged: list = []
+    for item in arr_a + arr_b:
+        try:
+            key = json.dumps(item, sort_keys=True, default=str) if isinstance(item, (dict, list)) else item
+        except (TypeError, ValueError):
+            key = str(item)
+        if key not in seen:
+            seen.add(key)
+            merged.append(item)
     return json.dumps(merged) if merged else "[]"
 
 
@@ -427,51 +438,60 @@ class HuntContext:
         self._conn.executescript(_SCHEMA_SQL)
 
     def _maybe_migrate(self) -> None:
-        """Apply schema migrations for existing databases."""
+        """Apply schema migrations for existing databases.
+
+        Uses explicit transaction (BEGIN/COMMIT) around the table rebuild to
+        ensure atomicity — an interrupted migration will roll back cleanly.
+        """
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(findings)").fetchall()}
         if "method" not in columns:
             logger.info("Migrating findings table: adding 'method' column + updated UNIQUE")
-            self._conn.executescript("""
-                ALTER TABLE findings RENAME TO _findings_old;
-
-                CREATE TABLE findings (
-                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                    hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
-                    finding_type     TEXT NOT NULL,
-                    severity         TEXT NOT NULL DEFAULT 'info',
-                    title            TEXT NOT NULL,
-                    description      TEXT,
-                    url              TEXT,
-                    endpoint         TEXT,
-                    parameter        TEXT NOT NULL DEFAULT '',
-                    method           TEXT NOT NULL DEFAULT '',
-                    evidence         TEXT,
-                    request_ids      TEXT DEFAULT '[]',
-                    tool_run_id      INTEGER REFERENCES tool_runs(id),
-                    confirmed        INTEGER DEFAULT 0,
-                    false_positive   INTEGER DEFAULT 0,
-                    reported         INTEGER DEFAULT 0,
-                    template_id      TEXT,
-                    tags             TEXT DEFAULT '[]',
-                    created_at       TEXT NOT NULL,
-                    updated_at       TEXT NOT NULL,
-                    UNIQUE(hunt_id, finding_type, url, method, parameter)
-                );
-
-                INSERT INTO findings
-                    (id, hunt_id, finding_type, severity, title, description,
-                     url, endpoint, parameter, method, evidence, request_ids,
-                     tool_run_id, confirmed, false_positive, reported,
-                     template_id, tags, created_at, updated_at)
-                SELECT
-                    id, hunt_id, finding_type, severity, title, description,
-                    url, endpoint, parameter, '', evidence, request_ids,
-                    tool_run_id, confirmed, false_positive, reported,
-                    template_id, tags, created_at, updated_at
-                FROM _findings_old;
-
-                DROP TABLE _findings_old;
-            """)
+            self._conn.execute("BEGIN")
+            try:
+                self._conn.execute("ALTER TABLE findings RENAME TO _findings_old")
+                self._conn.execute("""
+                    CREATE TABLE findings (
+                        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+                        finding_type     TEXT NOT NULL,
+                        severity         TEXT NOT NULL DEFAULT 'info',
+                        title            TEXT NOT NULL,
+                        description      TEXT,
+                        url              TEXT,
+                        endpoint         TEXT,
+                        parameter        TEXT NOT NULL DEFAULT '',
+                        method           TEXT NOT NULL DEFAULT '',
+                        evidence         TEXT,
+                        request_ids      TEXT DEFAULT '[]',
+                        tool_run_id      INTEGER REFERENCES tool_runs(id),
+                        confirmed        INTEGER DEFAULT 0,
+                        false_positive   INTEGER DEFAULT 0,
+                        reported         INTEGER DEFAULT 0,
+                        template_id      TEXT,
+                        tags             TEXT DEFAULT '[]',
+                        created_at       TEXT NOT NULL,
+                        updated_at       TEXT NOT NULL,
+                        UNIQUE(hunt_id, finding_type, url, method, parameter)
+                    )
+                """)
+                self._conn.execute("""
+                    INSERT INTO findings
+                        (id, hunt_id, finding_type, severity, title, description,
+                         url, endpoint, parameter, method, evidence, request_ids,
+                         tool_run_id, confirmed, false_positive, reported,
+                         template_id, tags, created_at, updated_at)
+                    SELECT
+                        id, hunt_id, finding_type, severity, title, description,
+                        url, endpoint, parameter, '', evidence, request_ids,
+                        tool_run_id, confirmed, false_positive, reported,
+                        template_id, tags, created_at, updated_at
+                    FROM _findings_old
+                """)
+                self._conn.execute("DROP TABLE _findings_old")
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def _maybe_commit(self) -> None:
         """Commit unless inside a batch transaction (upsert_records)."""
@@ -1597,17 +1617,40 @@ class HuntContext:
     # ═══════════════════ V3: REPORTS ═══════════════════
 
     def upsert_report(self, hunt_id: str, report: dict[str, Any]) -> int:
-        """Insert or update a report. Returns the row ID."""
+        """Insert or update a report. Returns the row ID.
+
+        Uses the appropriate partial unique index depending on whether the report
+        is for a finding-only, chain-only, or both. SQLite treats NULL as distinct
+        in UNIQUE constraints, so we must target the correct partial index.
+        """
         now = _now()
-        cursor = self._conn.execute(
-            """INSERT INTO reports
-                (hunt_id, finding_id, chain_id, title, severity,
-                 cvss_score, cvss_vector, summary, steps, impact,
-                 remediation, evidence_refs, request_ids,
-                 platform, platform_report_id, platform_status,
-                 submitted_at, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(hunt_id, finding_id, chain_id) DO UPDATE SET
+        finding_id = report.get("finding_id")
+        chain_id = report.get("chain_id")
+
+        values = (
+            hunt_id,
+            finding_id,
+            chain_id,
+            report["title"],
+            report["severity"],
+            report.get("cvss_score"),
+            report.get("cvss_vector"),
+            report.get("summary"),
+            json.dumps(report.get("steps", [])),
+            report.get("impact"),
+            report.get("remediation"),
+            json.dumps(report.get("evidence_refs", [])),
+            json.dumps(report.get("request_ids", [])),
+            report.get("platform"),
+            report.get("platform_report_id"),
+            report.get("platform_status"),
+            report.get("submitted_at"),
+            report.get("status", "draft"),
+            now,
+            now,
+        )
+
+        _UPDATE_SET = """
                 title = excluded.title,
                 severity = excluded.severity,
                 cvss_score = excluded.cvss_score,
@@ -1623,30 +1666,30 @@ class HuntContext:
                 platform_status = COALESCE(excluded.platform_status, reports.platform_status),
                 submitted_at = COALESCE(excluded.submitted_at, reports.submitted_at),
                 status = excluded.status,
-                updated_at = excluded.updated_at""",
-            (
-                hunt_id,
-                report.get("finding_id"),
-                report.get("chain_id"),
-                report["title"],
-                report["severity"],
-                report.get("cvss_score"),
-                report.get("cvss_vector"),
-                report.get("summary"),
-                json.dumps(report.get("steps", [])),
-                report.get("impact"),
-                report.get("remediation"),
-                json.dumps(report.get("evidence_refs", [])),
-                json.dumps(report.get("request_ids", [])),
-                report.get("platform"),
-                report.get("platform_report_id"),
-                report.get("platform_status"),
-                report.get("submitted_at"),
-                report.get("status", "draft"),
-                now,
-                now,
-            ),
-        )
+                updated_at = excluded.updated_at"""
+
+        _INSERT_COLS = """INSERT INTO reports
+                (hunt_id, finding_id, chain_id, title, severity,
+                 cvss_score, cvss_vector, summary, steps, impact,
+                 remediation, evidence_refs, request_ids,
+                 platform, platform_report_id, platform_status,
+                 submitted_at, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+        if finding_id is not None and chain_id is None:
+            # Finding-only report — target the partial index idx_reports_finding
+            sql = f"""{_INSERT_COLS}
+            ON CONFLICT(hunt_id, finding_id) WHERE chain_id IS NULL DO UPDATE SET{_UPDATE_SET}"""
+        elif chain_id is not None and finding_id is None:
+            # Chain-only report — target the partial index idx_reports_chain
+            sql = f"""{_INSERT_COLS}
+            ON CONFLICT(hunt_id, chain_id) WHERE finding_id IS NULL DO UPDATE SET{_UPDATE_SET}"""
+        else:
+            # Both set (or both NULL, which shouldn't happen) — use table constraint
+            sql = f"""{_INSERT_COLS}
+            ON CONFLICT(hunt_id, finding_id, chain_id) DO UPDATE SET{_UPDATE_SET}"""
+
+        cursor = self._conn.execute(sql, values)
         self._conn.commit()
         return cursor.lastrowid or 0
 

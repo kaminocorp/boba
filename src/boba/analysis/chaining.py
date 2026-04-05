@@ -171,23 +171,35 @@ def detect_chains(
             matched.hunt_id = hunt_id
             chains.append(matched)
 
-    # Persist (idempotent: clear previous chains only when we have replacements)
-    if chains:
-        context.delete_chains(hunt_id)
-        for chain in chains:
-            chain.id = context.upsert_chain(hunt_id, {
-                "title": chain.title,
-                "description": chain.description,
-                "severity": chain.severity.value,
-                "confidence": chain.confidence.value,
-                "cvss_score": chain.cvss_score,
-                "cvss_vector": chain.cvss_vector,
-                "finding_ids": chain.finding_ids,
-                "chain_order": chain.chain_order,
-                "impact": chain.impact,
-                "prerequisites": chain.prerequisites,
-                "tags": chain.tags,
-            })
+    # Persist (idempotent: always clear previous chains, preserving validated confidence).
+    old_chains = context.get_chains(hunt_id)
+    # Build map of old chain confidence keyed by sorted finding_ids for matching
+    old_confidence: dict[str, str] = {}
+    for oc in old_chains:
+        fids_key = str(sorted(oc.get("finding_ids", [])))
+        old_confidence[fids_key] = oc.get("confidence", ChainStatus.HYPOTHETICAL.value)
+
+    context.delete_chains(hunt_id)
+    for chain in chains:
+        # Preserve VALIDATED confidence if the same chain (same findings) was validated before
+        fids_key = str(sorted(chain.finding_ids))
+        prev_conf = old_confidence.get(fids_key)
+        if prev_conf == ChainStatus.VALIDATED.value:
+            chain.confidence = ChainStatus.VALIDATED
+
+        chain.id = context.upsert_chain(hunt_id, {
+            "title": chain.title,
+            "description": chain.description,
+            "severity": chain.severity.value,
+            "confidence": chain.confidence.value,
+            "cvss_score": chain.cvss_score,
+            "cvss_vector": chain.cvss_vector,
+            "finding_ids": chain.finding_ids,
+            "chain_order": chain.chain_order,
+            "impact": chain.impact,
+            "prerequisites": chain.prerequisites,
+            "tags": chain.tags,
+        })
 
     return chains
 

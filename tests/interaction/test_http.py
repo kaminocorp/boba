@@ -215,7 +215,8 @@ class TestFuzzBaseline:
         assert len(captured_urls) >= 1
         baseline_url = captured_urls[0]
         assert "§" not in baseline_url
-        assert baseline_url == "https://example.com/api?id=&name="
+        # Baseline now substitutes first payload per position (not empty strings)
+        assert baseline_url == "https://example.com/api?id=1&name=test"
 
 
 class TestFuzzCombinations:

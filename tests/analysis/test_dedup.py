@@ -108,16 +108,22 @@ class TestDedupGroupCRUD:
 
 class TestDeduplicateFindings:
     def test_exact_url_param_dedup(self, context, hunt_id):
-        """Same URL + param from different finding types → grouped."""
+        """Same URL + param + vuln class from different sources → grouped.
+
+        Signal 1a now requires same vuln class to prevent merging unrelated
+        finding types (e.g., XSS and IDOR on the same endpoint).
+        'http' normalizes to 'nuclei' via _VULN_CLASS_ALIASES, so to test
+        cross-tool dedup we use two findings in the same normalized class.
+        """
         _insert_finding(
-            context, hunt_id, finding_type="sqli",
+            context, hunt_id, finding_type="nuclei",
             url="https://app.example.com/search", parameter="q",
-            title="SQLi on search",
+            title="Nuclei SQLi template match (manual)",
         )
         _insert_finding(
-            context, hunt_id, finding_type="http",  # Nuclei finding type
+            context, hunt_id, finding_type="http",  # Normalizes to "nuclei"
             url="https://app.example.com/search", parameter="q",
-            title="Nuclei SQLi template match",
+            title="Nuclei SQLi template match (auto)",
         )
 
         groups = deduplicate_findings(context, hunt_id)

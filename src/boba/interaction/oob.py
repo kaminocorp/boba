@@ -50,7 +50,9 @@ class OOBManager:
         """Deregister and cleanup."""
         if self._client and hasattr(self._client, "deregister"):
             try:
-                await self._client.deregister()
+                result = self._client.deregister()
+                if asyncio.iscoroutine(result):
+                    await result
             except Exception as exc:
                 logger.debug("Error deregistering OOB client: %s", exc)
         self._client = None
@@ -128,7 +130,9 @@ class OOBManager:
         while time.monotonic() < deadline:
             try:
                 if hasattr(self._client, "poll"):
-                    raw = await self._client.poll()
+                    raw = self._client.poll()
+                    if asyncio.iscoroutine(raw):
+                        raw = await raw
                 else:
                     raw = self._client.get_interactions()
 

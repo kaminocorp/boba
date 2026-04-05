@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.5](#035--final-prod-gate) — 6-agent parallel review: report upsert NULL dedup, scope enforcement on all 12 vuln tests, check_duplicate self-match, chain re-detection preserves validation, dedup cross-type false merge, finding parameter persistence, CSRF cross-origin body, SQLi time-based deadline, auth false-positive reduction, json_array_merge dedup, migration atomicity, subprocess zombie guard, fuzz baseline validity, OOB async/sync safety, reflected XSS scoring. 15 fixes, 0 regressions (579 tests)
 - [0.3.4](#034--prod-readiness-review) — 4-agent parallel review: chain deletion data loss, race test gather crash, scope bypass via empty-string fallback, ffuf empty-targets crash, scope None guard, dedup O(n)->O(1) via json_each, vuln finding persistence pipeline, PoC I/O resilience, public finding API. 9 fixes, 0 regressions (579 tests)
 - [0.3.3](#033--final-pre-prod-hardening) — 4-agent parallel review: JSON array merge via custom SQLite function (replaces fragile substr concat), findings method-aware UNIQUE + dedup, output truncation propagation, IDOR scope enforcement at entry, CIDR exclusion symmetry fix, vuln test deadlines, recon.urls failure signaling, thread-safety docs. 8 fixes, 0 regressions (579 tests)
 - [0.3.2](#032--production-readiness-sweep) — 6-agent parallel review: report UNIQUE NULL fix, evidence merge data corruption fix, browser stale-auth fix, CSRF/IDOR/auth false-positive/negative fixes, coverage host-filter + distinct counts, cross-type dedup, chain hunt_id, adapter null-safety, naabu scope mode, OOM pre-check, Bugcrowd formatter dedup step, CLI cleanup. 25 fixes, 0 regressions (579 tests)
@@ -28,6 +29,49 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.5 — Final Prod Gate
+
+**Date:** 2026-04-05
+**Scope:** 15 fixes across core, adapters, interaction, tools/vuln, and analysis layers. 0 regressions (579 tests pass).
+
+6-agent parallel review of all layers for final production gate. Pre-fix score: 7.5/10. Post-fix target: 8.5+. Concentrated on scope enforcement gaps (the framework's #1 safety invariant), data integrity in persistence/analysis, and false-positive reduction in vuln testing.
+
+### Tier 1 — Must-Fix (5 issues)
+
+1. **`upsert_report` silently created duplicate reports** (`context.py:1599`) — `ON CONFLICT(hunt_id, finding_id, chain_id)` fails when either `finding_id` or `chain_id` is NULL because SQLite treats NULL as distinct in UNIQUE constraints. Finding-only and chain-only reports (the common case) duplicated on every upsert. Split into three code paths targeting the appropriate partial index: `ON CONFLICT(hunt_id, finding_id) WHERE chain_id IS NULL` for finding-only, `ON CONFLICT(hunt_id, chain_id) WHERE finding_id IS NULL` for chain-only, and the table-level constraint for both-set.
+
+2. **`check_duplicate()` matched finding against itself** (`dedup.py:223`) — No self-exclusion in the loop, so any persisted finding was immediately flagged as its own duplicate. Added `if finding_id is not None and ef["id"] == finding_id: continue` guard.
+
+3. **`detect_chains()` destroyed validated chain confidence + left stale chains** (`chaining.py:174-190`) — Re-running detection deleted all chains (including VALIDATED ones) then re-inserted with HYPOTHETICAL confidence. Also, if re-run found zero chains, stale chains persisted. Fix: always delete old chains; before re-inserting, check if the same chain (by sorted finding_ids) was previously VALIDATED, and preserve that confidence.
+
+4. **10 of 12 vuln test functions lacked scope enforcement** (`vuln.py`) — Only `test_idor` checked scope. `test_ssrf`, `test_xss`, `test_sqli`, `test_auth`, `test_race`, `test_redirect`, `test_csrf`, `test_mass_assign`, `test_reset`, and `test_ai` would fire payloads at out-of-scope targets — violating the framework's "defensive by default" invariant. Added `scope_engine: Any | None = None` parameter and entry check to all 10 functions.
+
+5. **`test_xss`/`test_sqli`/`test_auth` finding persistence omitted parameter name** (`vuln.py:635,864,1007`) — The findings UNIQUE key includes `parameter`, but it was always empty string. A second finding on the same URL (different param) overwrote the first, losing data. Now passes comma-joined parameter names to `_persist_finding`.
+
+### Tier 2 — Should-Fix (10 issues)
+
+6. **`json_array_merge` accumulated duplicate evidence entries** (`context.py:58-61`) — Repeated upserts grew `evidence` and `request_ids` arrays unboundedly with duplicate items. Added deduplication via JSON-normalized set membership check.
+
+7. **Migration used `executescript` without transaction wrapping** (`context.py:434`) — `executescript` implicitly commits before running, so an interrupted migration (rename → create → copy → drop) could leave the database in an inconsistent state with `_findings_old` existing. Replaced with explicit `BEGIN`/`COMMIT`/`ROLLBACK` around individual `execute()` calls.
+
+8. **`process.wait()` after stream drain had no timeout** (`subprocess.py:94`) — A zombie process that closes pipes but doesn't exit would hang indefinitely. Added 10-second timeout with kill fallback.
+
+9. **`test_csrf` cross-origin test sent original body** (`vuln.py:1319`) — Test 3 (cross-origin) used `body=body` (with valid CSRF tokens) instead of `body=clean_body`. The valid token masked whether the server actually enforced Origin checks. Changed to `clean_body`.
+
+10. **`test_sqli` time-based loop ignored deadline** (`vuln.py:781-847`) — Error/boolean loops checked `_deadline`, but the time-based phase (15s × N payloads × N DB types) had no deadline check. Could run 10+ minutes past `max_test_seconds`. Added deadline checks before the time-based phase and inside the payload loop.
+
+11. **`test_auth` flagged public endpoints as CONFIRMED vulnerable** (`vuln.py:899-908`) — Any 200 response without auth was marked `vulnerable=True, confidence=CONFIRMED`, catching health checks and login pages. Now: without a session to compare against, only admin-like endpoints are flagged (LIKELY). With a session, compares authed vs unauthed responses — different content confirms the endpoint is auth-aware but unenforced (CONFIRMED).
+
+12. **Dedup Signal 1a merged different vuln classes** (`dedup.py:123`) — Key was `(url, method, param)` without `finding_type`, so an XSS and IDOR on the same endpoint merged as duplicates. Added `ftype` to the key.
+
+13. **Reflected XSS underscored by ~1.1 CVSS points** (`severity.py:174`) — `attack_complexity=H` double-penalized reflected XSS (industry norm: AC:L with UI:R). Dropped the AC override for non-stored/non-DOM XSS; `UI:R` already captures the user-interaction requirement.
+
+14. **Fuzz baseline stripped markers to empty strings** (`http.py:289-294`) — `§id§` became `//` in URLs, producing invalid baselines that skewed anomaly detection. Now substitutes the first payload value per position, keeping the baseline URL/body structurally valid.
+
+15. **OOB manager assumed Interactsh client is async** (`oob.py:51,130`) — `await client.deregister()` and `await client.poll()` would crash if the real Interactsh package exposes sync methods. Added `asyncio.iscoroutine()` check; calls `await` only on actual coroutines.
 
 ---
 

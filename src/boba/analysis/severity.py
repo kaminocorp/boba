@@ -167,12 +167,10 @@ def auto_score_finding(finding: dict[str, Any]) -> CVSSScore:
                 metrics["confidentiality"] = "H"
 
         elif ftype == "xss":
-            # Stored XSS is worse than reflected
+            # Stored XSS is worse than reflected — upgrade scope to Changed
             if "stored" in evidence_str or "dom_based" in evidence_str:
                 metrics["attack_complexity"] = "L"
-            else:
-                # Reflected XSS — requires user interaction + higher complexity
-                metrics["attack_complexity"] = "H"
+            # Reflected XSS: AC:L is standard (UI:R already captures user interaction)
 
         elif ftype == "auth":
             # Admin access → availability impact too

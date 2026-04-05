@@ -118,9 +118,10 @@ def deduplicate_findings(
         method = f.get("method", "")
         ftype = _normalize_vuln_class(f.get("finding_type", ""))
 
-        # Signal 1a: exact URL + method + param (cross-type — Nuclei + manual find same thing)
+        # Signal 1a: exact URL + method + param + vuln class (Nuclei + manual find same thing)
+        # Includes vuln class to prevent merging unrelated finding types (e.g., XSS + IDOR)
         if url:
-            key1a = (url, method, param)
+            key1a = (url, method, param, ftype) if ftype else (url, method, param, "")
             by_url_param_exact.setdefault(key1a, []).append(fid)
 
         # Signal 1b: exact URL + method + param + vuln class
@@ -220,7 +221,12 @@ def check_duplicate(
     all_findings = context.get_findings(hunt_id)
     host = _extract_host(url)
 
+    finding_id = finding.get("id")
     for ef in all_findings:
+        # Skip self-match when the finding is already persisted
+        if finding_id is not None and ef["id"] == finding_id:
+            continue
+
         ef_url = ef.get("url") or ""
         ef_param = ef.get("parameter", "")
         ef_method = ef.get("method", "")

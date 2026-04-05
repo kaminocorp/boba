@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections.abc import AsyncIterator, Callable
 
 from boba.core.models import SubprocessResult
+
+logger = logging.getLogger(__name__)
 
 
 _MAX_OUTPUT_BYTES = 256 * 1024 * 1024  # 256 MB cap to prevent OOM
@@ -91,7 +94,14 @@ async def run_subprocess(
             ),
             timeout=timeout,
         )
-        await process.wait()
+        # Streams closed — process should have exited. Use a short timeout to
+        # guard against zombie processes that close pipes but don't exit.
+        try:
+            await asyncio.wait_for(process.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("Process did not exit after streams closed; killing.")
+            process.kill()
+            await process.wait()
 
     except asyncio.TimeoutError:
         timed_out = True
