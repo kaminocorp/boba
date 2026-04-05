@@ -171,9 +171,9 @@ def detect_chains(
             matched.hunt_id = hunt_id
             chains.append(matched)
 
-    # Persist (idempotent: always clear previous chains, then insert new ones)
-    context.delete_chains(hunt_id)
+    # Persist (idempotent: clear previous chains only when we have replacements)
     if chains:
+        context.delete_chains(hunt_id)
         for chain in chains:
             chain.id = context.upsert_chain(hunt_id, {
                 "title": chain.title,

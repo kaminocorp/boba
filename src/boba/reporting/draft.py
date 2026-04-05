@@ -32,7 +32,7 @@ def draft_finding_report(
     Pulls from finding record, HTTP history, and CVSS scoring.
     Persists the draft to the reports table.
     """
-    finding = context._get_finding_by_id(finding_id)
+    finding = context.get_finding_by_id(finding_id)
     if not finding:
         raise ValueError(f"Finding {finding_id} not found")
 
@@ -122,7 +122,7 @@ def draft_chain_report(
     all_request_ids: list[int] = []
 
     for i, fid in enumerate(finding_ids, 1):
-        finding = context._get_finding_by_id(fid)
+        finding = context.get_finding_by_id(fid)
         if not finding:
             continue
         ftype = finding.get("finding_type", "unknown")

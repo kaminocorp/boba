@@ -80,6 +80,38 @@ def _record_coverage(
         logger.debug("Failed to record coverage for %s %s: %s", test_type, url, exc)
 
 
+def _persist_finding(
+    context: HuntContext | None,
+    hunt_id: str,
+    result: VulnTestResult,
+    url: str,
+    method: str = "GET",
+    parameter: str = "",
+) -> int | None:
+    """Persist a positive VulnTestResult as a finding. Returns finding ID or None."""
+    if not context or not hunt_id or not result.vulnerable:
+        return None
+    try:
+        return context.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": result.test_type,
+                "severity": result.severity.value,
+                "title": result.title,
+                "description": result.description,
+                "url": url,
+                "method": method,
+                "parameter": parameter,
+                "evidence": result.evidence,
+                "request_ids": result.request_ids,
+                "confirmed": result.confidence == Confidence.CONFIRMED,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist finding for %s %s: %s", result.test_type, url, exc)
+        return None
+
+
 async def test_idor(
     http_client: HttpClient,
     session_a: SessionState,
@@ -257,6 +289,7 @@ async def test_idor(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, endpoint, method)
     _record_coverage(context, hunt_id, endpoint, method, "", "idor")
     return result
 
@@ -432,6 +465,7 @@ async def test_ssrf(
         else [],
     )
     param_name = injection_points[0].get("name", "url") if injection_points else "url"
+    _persist_finding(context, hunt_id, result, url, method, param_name)
     _record_coverage(context, hunt_id, url, method, param_name, "ssrf")
     return result
 
@@ -598,6 +632,7 @@ async def test_xss(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, method)
     test_params = params or {"q": ""}
     for pname in test_params:
         _record_coverage(context, hunt_id, url, method, pname, "xss")
@@ -826,6 +861,7 @@ async def test_sqli(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, method)
     test_params = params or {"id": "1"}
     for pname in test_params:
         _record_coverage(context, hunt_id, url, method, pname, "sqli")
@@ -968,6 +1004,7 @@ async def test_auth(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, endpoint)
     _record_coverage(context, hunt_id, endpoint, "GET", "", "auth")
     return result
 
@@ -1006,7 +1043,21 @@ async def test_race(
             tags=["race"],
         )
 
-    responses = await asyncio.gather(*[_send() for _ in range(concurrency)])
+    results = await asyncio.gather(
+        *[_send() for _ in range(concurrency)], return_exceptions=True
+    )
+    responses = [r for r in results if not isinstance(r, BaseException)]
+    errors = [r for r in results if isinstance(r, BaseException)]
+    if errors:
+        logger.warning("Race test: %d/%d requests failed", len(errors), concurrency)
+    if not responses:
+        return VulnTestResult(
+            test_type="race_condition",
+            vulnerable=False,
+            title="Race condition test failed — all requests errored",
+            description=f"All {concurrency} concurrent requests failed.",
+            severity=Severity.INFO,
+        )
     request_ids = [r.request_id for r in responses]
 
     # Analyze: check for divergent responses
@@ -1069,6 +1120,7 @@ async def test_race(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "race")
     return result
 
@@ -1155,6 +1207,7 @@ async def test_redirect(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, "GET", param)
     _record_coverage(context, hunt_id, url, "GET", param, "redirect")
     return result
 
@@ -1297,6 +1350,7 @@ async def test_csrf(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "csrf")
     return result
 
@@ -1412,6 +1466,7 @@ async def test_mass_assign(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "mass_assign")
     return result
 
@@ -1511,6 +1566,7 @@ async def test_reset(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, "POST", email_param)
     _record_coverage(context, hunt_id, url, "POST", email_param, "reset")
     return result
 
@@ -1609,6 +1665,7 @@ async def test_ai(
         if vulnerable
         else [],
     )
+    _persist_finding(context, hunt_id, result, url, "GET", param)
     _record_coverage(context, hunt_id, url, "GET", param, "ai")
     return result
 

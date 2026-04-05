@@ -72,4 +72,5 @@ class HttpxRunnerAdapter(BaseAdapter):
         }
 
     def extract_scope_target(self, record: dict[str, Any]) -> str | None:
-        return record.get("host") or record.get("url")
+        host = record.get("host")
+        return host if host is not None and host != "" else record.get("url")

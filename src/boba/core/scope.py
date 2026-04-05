@@ -89,6 +89,8 @@ class ScopeEngine:
             target: Domain, IP, or URL to check.
             entity_type: One of "subdomain", "host", "ip", "url", or "auto".
         """
+        if not target:
+            return False
         if entity_type == "auto":
             entity_type = self._guess_entity_type(target)
 

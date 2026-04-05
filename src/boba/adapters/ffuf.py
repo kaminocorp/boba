@@ -42,6 +42,8 @@ class FfufAdapter(BaseAdapter):
         return "go install -v github.com/ffuf/ffuf/v2@latest"
 
     def build_command(self, targets: list[str], config: AdapterConfig) -> tuple[list[str], Path]:
+        if not targets:
+            raise ValueError("ffuf requires at least one target URL, but targets list is empty")
         if len(targets) > 1:
             logger.warning(
                 "ffuf only supports a single target URL; using first target, "

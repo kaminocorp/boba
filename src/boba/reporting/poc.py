@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from boba.core.context import HuntContext
 from boba.core.models import PoCPackage
+
+logger = logging.getLogger(__name__)
 
 
 def package_poc(
@@ -44,7 +47,7 @@ def package_poc(
     steps: list[str] = []
 
     if finding_id:
-        finding = context._get_finding_by_id(finding_id)
+        finding = context.get_finding_by_id(finding_id)
         if finding:
             title = finding.get("title", title)
             ev = finding.get("evidence")
@@ -62,7 +65,7 @@ def package_poc(
         if chain:
             title = chain.get("title", title)
             for fid in chain.get("finding_ids", []):
-                finding = context._get_finding_by_id(fid)
+                finding = context.get_finding_by_id(fid)
                 if finding:
                     ev = finding.get("evidence")
                     if isinstance(ev, list):
@@ -77,7 +80,11 @@ def package_poc(
         if record:
             http_text = _format_http_dump(record)
             dump_path = requests_dir / f"{i:03d}_request.http"
-            dump_path.write_text(http_text, encoding="utf-8")
+            try:
+                dump_path.write_text(http_text, encoding="utf-8")
+            except OSError as exc:
+                logger.warning("Failed to write HTTP dump %s: %s", dump_path, exc)
+                continue
             package.http_dumps.append({
                 "request_id": rid,
                 "file": str(dump_path),

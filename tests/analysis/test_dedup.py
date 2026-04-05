@@ -188,7 +188,7 @@ class TestDeduplicateFindings:
 
         groups = deduplicate_findings(context, hunt_id)
         assert len(groups) == 1
-        canonical = context._get_finding_by_id(groups[0].canonical_id)
+        canonical = context.get_finding_by_id(groups[0].canonical_id)
         assert canonical["title"] == "IDOR confirmed"
 
     def test_canonical_selection_severity_tiebreak(self, context, hunt_id):
@@ -206,7 +206,7 @@ class TestDeduplicateFindings:
 
         groups = deduplicate_findings(context, hunt_id)
         assert len(groups) == 1
-        canonical = context._get_finding_by_id(groups[0].canonical_id)
+        canonical = context.get_finding_by_id(groups[0].canonical_id)
         assert canonical["title"] == "SSRF critical"
 
     def test_idempotent(self, context, hunt_id):

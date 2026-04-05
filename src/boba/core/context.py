@@ -1457,34 +1457,37 @@ class HuntContext:
 
     def is_duplicate(self, hunt_id: str, finding_id: int) -> bool:
         """Check if a finding is a non-canonical member of any dedup group."""
-        rows = self._conn.execute(
-            "SELECT finding_ids FROM dedup_groups WHERE hunt_id = ?", (hunt_id,)
-        ).fetchall()
-        for row in rows:
-            ids = _parse_json_field(row["finding_ids"], "[]", label="finding_ids", record_id="?")
-            canonical_row = self._conn.execute(
-                "SELECT canonical_id FROM dedup_groups WHERE hunt_id = ? AND finding_ids = ?",
-                (hunt_id, row["finding_ids"]),
-            ).fetchone()
-            canonical_id = canonical_row["canonical_id"] if canonical_row else None
-            if finding_id in ids and finding_id != canonical_id:
-                return True
-        return False
+        row = self._conn.execute(
+            """
+            SELECT canonical_id FROM dedup_groups
+            WHERE hunt_id = ?
+              AND EXISTS (
+                SELECT 1 FROM json_each(finding_ids) WHERE value = ?
+              )
+            """,
+            (hunt_id, finding_id),
+        ).fetchone()
+        if not row:
+            return False
+        return finding_id != row["canonical_id"]
 
     def get_canonical_finding(self, hunt_id: str, finding_id: int) -> dict[str, Any] | None:
         """If finding is in a dedup group, return the canonical finding; else return itself."""
-        rows = self._conn.execute(
-            "SELECT canonical_id, finding_ids FROM dedup_groups WHERE hunt_id = ?",
-            (hunt_id,),
-        ).fetchall()
-        for row in rows:
-            ids = _parse_json_field(row["finding_ids"], "[]", label="finding_ids", record_id="?")
-            if finding_id in ids:
-                canonical_id = row["canonical_id"]
-                return self._get_finding_by_id(canonical_id)
-        return self._get_finding_by_id(finding_id)
+        row = self._conn.execute(
+            """
+            SELECT canonical_id FROM dedup_groups
+            WHERE hunt_id = ?
+              AND EXISTS (
+                SELECT 1 FROM json_each(finding_ids) WHERE value = ?
+              )
+            """,
+            (hunt_id, finding_id),
+        ).fetchone()
+        if row:
+            return self.get_finding_by_id(row["canonical_id"])
+        return self.get_finding_by_id(finding_id)
 
-    def _get_finding_by_id(self, finding_id: int) -> dict[str, Any] | None:
+    def get_finding_by_id(self, finding_id: int) -> dict[str, Any] | None:
         """Get a single finding by its primary key."""
         row = self._conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
         if not row:

@@ -68,4 +68,5 @@ class WhatwebAdapter(BaseAdapter):
         }
 
     def extract_scope_target(self, record: dict[str, Any]) -> str | None:
-        return record.get("url") or record.get("host")
+        url = record.get("url")
+        return url if url is not None and url != "" else record.get("host")

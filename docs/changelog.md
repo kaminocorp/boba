@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.4](#034--prod-readiness-review) — 4-agent parallel review: chain deletion data loss, race test gather crash, scope bypass via empty-string fallback, ffuf empty-targets crash, scope None guard, dedup O(n)->O(1) via json_each, vuln finding persistence pipeline, PoC I/O resilience, public finding API. 9 fixes, 0 regressions (579 tests)
 - [0.3.3](#033--final-pre-prod-hardening) — 4-agent parallel review: JSON array merge via custom SQLite function (replaces fragile substr concat), findings method-aware UNIQUE + dedup, output truncation propagation, IDOR scope enforcement at entry, CIDR exclusion symmetry fix, vuln test deadlines, recon.urls failure signaling, thread-safety docs. 8 fixes, 0 regressions (579 tests)
 - [0.3.2](#032--production-readiness-sweep) — 6-agent parallel review: report UNIQUE NULL fix, evidence merge data corruption fix, browser stale-auth fix, CSRF/IDOR/auth false-positive/negative fixes, coverage host-filter + distinct counts, cross-type dedup, chain hunt_id, adapter null-safety, naabu scope mode, OOM pre-check, Bugcrowd formatter dedup step, CLI cleanup. 25 fixes, 0 regressions (579 tests)
 - [0.3.1](#031--pre-production-hardening) — 5-agent parallel review: CVSS formula fix, CLI coverage integration, scope scheme bypass, IDOR/race/SQLi/CSRF/AI detection improvements, host upsert COALESCE, finding NULL dedup, chain idempotency, report severity consistency. 19 fixes, 0 regressions (579 tests)
@@ -27,6 +28,37 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.4 — Prod Readiness Review
+
+**Date:** 2026-04-02
+**Scope:** 9 fixes across core, adapters, tools, analysis, and reporting layers. 0 regressions (579 tests pass).
+
+4-agent parallel review of all layers for final production gate. Scored 7.5/10 pre-fix, targeting 8.5+. Triaged findings into 4 must-fix and 5 should-fix issues. No fundamental architecture problems found — issues concentrated in edge-case handling and V2/V3 persistence gaps.
+
+### Tier 1 — Must-Fix (4 issues)
+
+1. **Chain deletion data loss prevented** (`chaining.py:175`) — `detect_chains()` called `context.delete_chains(hunt_id)` unconditionally before checking if new chains were found. When detection returned zero chains (e.g., findings modified between runs), all previously detected chains were permanently deleted. Moved `delete_chains()` inside the `if chains:` block so deletion only occurs when replacement chains are ready.
+
+2. **Race condition test gather crash fixed** (`vuln.py:1009`) — `asyncio.gather()` in `test_race()` lacked `return_exceptions=True`. A single failed HTTP request (timeout, connection reset) crashed the entire concurrent batch, losing evidence from all successful requests. Now collects exceptions separately, logs warning with failure count, and analyzes successful responses. Returns early INFO result if all requests fail.
+
+3. **Scope bypass via empty-string fallback fixed** (`httpx_runner.py:75`, `nuclei.py:84`, `whatweb.py:71`) — `extract_scope_target()` used Python's `or` operator: `record.get("host") or record.get("url")`. Empty string `""` is falsy, so records with intentionally empty host fields fell through to the URL field, bypassing the intended scope-check target. Changed to explicit `None`/empty-string check: `host if host is not None and host != "" else record.get("url")`.
+
+4. **FfufAdapter crash on empty targets** (`ffuf.py:51`) — `targets[0]` accessed without bounds check. If `pre_filter_targets()` filtered all targets to empty (all out of scope), raised `IndexError`. Added explicit guard with descriptive `ValueError`.
+
+### Tier 2 — Should-Fix (5 issues)
+
+5. **ScopeEngine.is_in_scope(None) crash fixed** (`scope.py:84`) — Passing `None` to `is_in_scope()` raised `TypeError` in `_guess_entity_type()` when checking `"://" in target`. Added early `if not target: return False` guard. Default-deny: falsy inputs are out of scope.
+
+6. **Dedup queries optimized from O(n) to O(1)** (`context.py:1458-1485`) — `is_duplicate()` and `get_canonical_finding()` fetched ALL dedup groups for a hunt, parsed each JSON array in Python, and looped to find a match. Replaced with single SQL queries using `json_each()` subquery: `WHERE EXISTS (SELECT 1 FROM json_each(finding_ids) WHERE value = ?)`. Constant-time regardless of group count.
+
+7. **Vulnerability test results now persisted as findings** (`vuln.py`) — All 12 vuln test functions (IDOR, SSRF, XSS, SQLi, auth, race, redirect, CSRF, mass assignment, reset, AI) returned `VulnTestResult` objects that were printed by CLI then discarded. Added `_persist_finding()` helper that converts positive results to finding dicts and upserts via `context.upsert_finding()`. Called before `_record_coverage()` in every test function. Only persists when `context`, `hunt_id`, and `vulnerable=True`. This closes the evidence chain: vuln tests -> findings -> dedup -> chaining -> reports.
+
+8. **PoC file writes resilient to I/O errors** (`poc.py:80`) — HTTP dump `write_text()` had no error handling. Disk full or permission errors crashed PoC generation mid-package, leaving manifest inconsistent with files on disk. Wrapped in `try/except OSError` with warning log; `package.http_dumps` only appended after successful write.
+
+9. **`_get_finding_by_id()` exposed as public API** (`context.py:1487`, `draft.py:35`, `poc.py:47`) — Reporting layer depended on private `_get_finding_by_id()`. Renamed to `get_finding_by_id()` and updated all 4 callers (draft.py x2, poc.py x2) plus 2 test references. Stabilizes the cross-layer contract.
 
 ---
 
