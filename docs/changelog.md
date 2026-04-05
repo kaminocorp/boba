@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.5.0](#050--documentation--agent-readiness) — Agent orientation guide, V4 implementation plan, README/TLDR updated to reflect V3 completion. Documentation milestone, 0 code changes, 0 regressions (592 tests)
 - [0.4.2](#042--prod-gate-confidence-accuracy--report-integrity) — Auth confidence inverted, PoC file numbering desync on missing/failed records, Bugcrowd formatter empty steps on single-step reports, missing FK CASCADE on dedup_groups/reports. 4 fixes, 0 regressions (592 tests)
 - [0.4.1](#041--prod-gate-detection-correctness--id-integrity) — Redirect detection completely broken (follow_redirects=True), upsert lastrowid undefined on update path, cross-type dedup suppressing distinct vulns, DOM XSS early exit, false chain rules, step ordering, adapter hardening. 11 fixes, 0 regressions (592 tests)
 - [0.4.0](#040--prod-gate-final-boundary-safety--cache-consistency) — Session cache invalidation bug, nuclei/httpx/whatweb type coercion at parse boundaries, evidence serialization clarity, migration idempotency guard. 6 fixes, 0 regressions (592 tests)
@@ -36,6 +37,71 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.0 — Documentation & Agent Readiness
+
+**Date:** 2026-04-05
+**Scope:** Documentation milestone. Full codebase audit against product vision, new agent orientation guide, V4 implementation plan, README and TLDR updated. 0 code changes, 0 regressions (592 tests pass).
+
+After completing V1 (recon/enumeration), V2 (browser/HTTP interaction + 5 vuln tools), V3 (analysis/chaining/reporting + 6 more vuln tools), and 12 production-hardening releases (0.3.1–0.4.2), the framework was assessed at 8.5+/10 production-ready with 592 passing tests. This release marks the transition from building to using — preparing the toolkit for its first real-world bug bounty engagement.
+
+### Codebase Audit vs. Product Vision
+
+Systematic 5-agent parallel audit of the entire codebase against every capability in `docs/product-vision.md`. Results:
+
+| Phase | Capabilities | Implemented | Coverage |
+|---|---|---|---|
+| V1 — Recon & Enumeration | 14 | 7 | 50% |
+| V2 — Interaction & Testing | 26 | 22 | 85% |
+| V3 — Analysis & Reporting | 12 | 9 | 75% |
+| V4 — Autonomy | 8 | 0 | 0% |
+| **Total** | **60** | **38** | **63%** |
+
+**Key finding:** V1–V3 delivers a complete end-to-end pipeline (discover → interact → test → analyze → report). The 37% gap is split between recon breadth (7 missing discovery capabilities), platform API submission (3 capabilities), program selection (4 capabilities), and infrastructure management (4 capabilities). The latter three categories are intentionally deferred — Boba remains a toolkit, not an autonomous platform.
+
+### NEW — Agent Orientation Guide
+
+> `docs/agent-orientation.md`
+
+Field manual for agents operating Boba. Not developer docs — an operator's manual covering:
+
+- External tool installation table (9 binaries, exact install commands)
+- Complete 7-phase hunt workflow with exact CLI commands for every step
+- All 48+ CLI commands documented with real flags and usage patterns
+- 11 vulnerability test tools with full flag reference
+- Decision-making heuristics: what to test first based on recon results, how to prioritize, what to do when stuck
+- Post-testing checklist: dedupe → score → chain → coverage gaps → report
+
+### NEW — V4 Implementation Plan
+
+> `docs/executing/v4-implementation-plan.md`
+
+Closes the recon breadth gap (7 → 14 capabilities). 3 phases ordered by impact:
+
+- **Phase 1 (CRITICAL):** Parameter discovery via Arjun adapter — feeds all 11 existing vuln test tools with hidden query/body/header params they can't currently find
+- **Phase 2 (HIGH):** GitHub secret scanning via gitleaks adapter + API surface mapping via Kiterunner adapter
+- **Phase 3 (MEDIUM):** GraphQL introspection, ASN/IP range enumeration, cloud bucket discovery — all Python-native (no external binary), using existing HttpClient
+
+Defines 6 new SQLite tables (parameters, secrets, api_endpoints, graphql_schemas, ip_ranges, cloud_buckets), 3 new adapters, integration points with existing analysis/coverage/prioritization, and ~105 estimated new tests.
+
+### Updated — README.md
+
+- Logo size increased (200px → 320px)
+- Added "Agent Guide" link to navigation bar
+- Quickstart: updated to show full pipeline (recon → test → analyze → chain → report) with accurate CLI syntax
+- "What It Does": expanded from 3 sections to 6 — added Analysis & Intelligence, Reporting descriptions; expanded Vulnerability Testing from 5 to 11 detection engines; Persistence updated from "every entity" to "17 tables" with full list
+- Test count: 206 → 592
+- Roadmap: V3 checked off; V4 updated from "autonomous hunt loops" to "recon breadth"
+
+### Updated — docs/tldr.md
+
+- Version: v0.2.11 → v0.4.2
+- Vuln tools: "Five" → "Eleven" with full list
+- Added analysis layer and reporting layer descriptions
+- Quality passes: 11 → 24+; tests: 206 → 592
+- V4 description aligned with implementation plan
 
 ---
 

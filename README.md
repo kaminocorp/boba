@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="boba" width="200" />
+  <img src="assets/logo.png" alt="boba" width="320" />
 </p>
 
 <h1 align="center">boba</h1>
@@ -13,6 +13,7 @@
   <a href="#quickstart">Quickstart</a> &middot;
   <a href="#what-it-does">What It Does</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
+  <a href="docs/agent-orientation.md">Agent Guide</a> &middot;
   <a href="docs/product-vision.md">Vision</a> &middot;
   <a href="docs/changelog.md">Changelog</a>
 </p>
@@ -31,34 +32,44 @@ boba --help
 ```
 
 ```bash
-# Create a hunt, define scope, run recon
-boba hunt create --name acme --domains "*.acme.com"
-boba recon subdomains --hunt-id <id> --domains acme.com
-boba recon hosts --hunt-id <id>
-boba recon urls --hunt-id <id>
+# Create a hunt with scope, run recon
+boba hunt create --name acme --scope scope.yaml
+boba recon subdomains <id> --domain acme.com
+boba recon hosts <id>
+boba recon urls <id> --domain acme.com
 
 # Test for vulnerabilities
-boba test idor --hunt-id <id> --url https://app.acme.com/api/user/42
-boba test ssrf --hunt-id <id> --url https://app.acme.com/fetch?url=
-boba test xss --hunt-id <id> --url "https://app.acme.com/search?q="
+boba test sqli <id> --url https://app.acme.com/search --param q
+boba test xss <id> --url https://app.acme.com/search --param q
+boba test auth <id> --endpoint https://app.acme.com/admin
+
+# Analyze, chain, and report
+boba analyze severity <id> --platform hackerone
+boba analyze chain <id>
+boba report draft <id> --finding-id 7
+boba report format <id> --report-id 1 --platform hackerone
 
 # Query what you've found
-boba context stats --hunt-id <id> --format json
+boba context stats <id> --format json
 ```
 
 Every command supports `--format json` for agent consumption.
 
 ## What It Does
 
-**Recon & Enumeration** — Subdomain discovery, live host detection, port scanning, historical URL mining, tech fingerprinting, directory fuzzing. 9 adapters wrapping subfinder, httpx, naabu, gau, waybackurls, whatweb, katana, ffuf, nuclei.
+**Recon & Enumeration** — Subdomain discovery, live host detection, port scanning, historical URL mining, tech fingerprinting, directory fuzzing, web crawling. 10 adapters wrapping subfinder, httpx, naabu, gau, waybackurls, whatweb, katana, ffuf, nuclei.
 
 **Web Interaction** — Headless Playwright browser with real-time traffic interception. HTTP client with `request()`, `replay()`, `compare()`, `fuzz()` — four Burp Intruder attack types. Named auth sessions (bearer, basic, cookie, form login). OOB callback listeners via Interactsh for blind vuln detection.
 
-**Vulnerability Testing** — Five detection engines: IDOR (multi-account response diffing), SSRF (response content analysis + OOB callbacks), XSS (reflected + DOM-based via browser), SQLi (error/boolean/time-based with multi-DBMS payloads), auth bypass (JWT `alg:none`, claim escalation, endpoint ACL testing). Nuclei adapter for template-based scanning with custom YAML support.
+**Vulnerability Testing** — 11 detection engines: IDOR (multi-account response diffing), SSRF (response content analysis + OOB callbacks), XSS (reflected + DOM-based via browser), SQLi (error/boolean/time-based with multi-DBMS payloads), auth bypass (JWT `alg:none`, claim escalation, endpoint ACL testing), CSRF (token validation + cross-origin), race conditions (concurrent request divergence), open redirect (external host detection), mass assignment (field persistence check), password reset (host header injection + rate limiting), AI/LLM prompt injection (exfiltration + override scoring). Nuclei adapter for template-based scanning with custom YAML support.
+
+**Analysis & Intelligence** — Coverage tracking (tested vs. untested per endpoint per vuln class), finding deduplication (union-find with canonical selection), CVSS 3.1 scoring with platform-specific payout estimation (HackerOne, Bugcrowd), vulnerability chaining (8 chain rules — e.g., redirect + SSRF → P1), and attack path prioritization (rank untested endpoints by likelihood of vulnerability).
+
+**Reporting** — Structured report drafting from findings and chains with auto-generated reproduction steps. Platform-specific formatting (HackerOne, Bugcrowd, generic markdown). PoC evidence packaging (HTTP request/response dumps, evidence.json, README).
 
 **Scope Enforcement** — Default-deny model. Exclusions always win over inclusions. Domain wildcards, CIDR ranges, URL prefixes. Enforced at the adapter layer — the agent cannot touch out-of-scope targets regardless of what it tries to pass downstream.
 
-**Persistence** — SQLite (WAL mode, FK constraints) backing every entity: subdomains, hosts, ports, URLs, technologies, directories, HTTP exchanges, findings, tool runs. Upserts deduplicate via `json_each()` merges. Full hunt state survives across invocations — the agent never loses context.
+**Persistence** — SQLite (WAL mode, FK constraints) backing 17 tables: subdomains, hosts, ports, URLs, technologies, directories, HTTP exchanges, sessions, findings, coverage, dedup groups, chains, OOB listeners, reports, tool runs. Upserts deduplicate via `json_each()` merges. Full hunt state survives across invocations — the agent never loses context.
 
 ## Architecture
 
@@ -97,7 +108,7 @@ Boba wraps these — install whichever you need:
 ```bash
 pip install -e ".[dev]"
 
-pytest                          # 206 tests
+pytest                          # 592 tests
 ruff check src/ tests/          # lint
 ruff format --check src/ tests/ # format check
 ```
@@ -106,10 +117,10 @@ Python 3.11+. Fully async. Dataclasses (not Pydantic). Ruff for lint + format (l
 
 ## Roadmap
 
-- [x] **V1** — Recon & enumeration (8 adapters, scope engine, persistence, CLI)
+- [x] **V1** — Recon & enumeration (10 adapters, scope engine, persistence, CLI)
 - [x] **V2** — Browser, HTTP interaction, vulnerability testing (5 vuln tools, Nuclei, sessions, OOB)
-- [ ] **V3** — Analysis, vuln chaining, report generation, platform API submission
-- [ ] **V4** — Autonomous hunt loops, program selection, continuous monitoring, infrastructure management
+- [x] **V3** — Analysis, chaining, severity scoring, report generation (6 more vuln tools, CVSS 3.1, platform formatting)
+- [ ] **V4** — Recon breadth (parameter discovery, API mapping, secret scanning, GraphQL, ASN, cloud buckets)
 
 ## License
 
