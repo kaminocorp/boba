@@ -99,8 +99,8 @@ class TestHttpxRunnerTypeGuard:
         record = adapter.parse_record(
             {"input": "example.com", "a": "192.168.1.1", "host": "example.com"}
         )
-        # Should NOT take first char of string; should fall back to host
-        assert record["ip"] == "example.com"
+        # Should NOT take first char of string; should fall back to empty string
+        assert record["ip"] == ""
 
     def test_a_field_is_list(self):
         adapter = self._adapter()

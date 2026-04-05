@@ -234,9 +234,10 @@ def check_duplicate(
 
         # Exact URL + method + parameter match (same or cross-type)
         if ef_url == url and ef_method == method and ef_param == param:
+            ids = sorted({ef["id"], finding_id}) if finding_id is not None else [ef["id"]]
             return DedupeGroup(
                 canonical_id=ef["id"],
-                finding_ids=[ef["id"]],
+                finding_ids=ids,
                 reason=f"Exact URL + method + parameter match: {method} {url}",
             )
 
@@ -249,9 +250,10 @@ def check_duplicate(
             and param
             and ef_type == ftype
         ):
+            ids = sorted({ef["id"], finding_id}) if finding_id is not None else [ef["id"]]
             return DedupeGroup(
                 canonical_id=ef["id"],
-                finding_ids=[ef["id"]],
+                finding_ids=ids,
                 reason=f"Same host ({host}) + method ({method}) + parameter ({param})",
             )
 

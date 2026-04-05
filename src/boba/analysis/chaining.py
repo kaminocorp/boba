@@ -174,15 +174,15 @@ def detect_chains(
     # Persist (idempotent: always clear previous chains, preserving validated confidence).
     old_chains = context.get_chains(hunt_id)
     # Build map of old chain confidence keyed by sorted finding_ids for matching
-    old_confidence: dict[str, str] = {}
+    old_confidence: dict[tuple[int, ...], str] = {}
     for oc in old_chains:
-        fids_key = str(sorted(oc.get("finding_ids", [])))
+        fids_key = tuple(sorted(oc.get("finding_ids", [])))
         old_confidence[fids_key] = oc.get("confidence", ChainStatus.HYPOTHETICAL.value)
 
     context.delete_chains(hunt_id)
     for chain in chains:
         # Preserve VALIDATED confidence if the same chain (same findings) was validated before
-        fids_key = str(sorted(chain.finding_ids))
+        fids_key = tuple(sorted(chain.finding_ids))
         prev_conf = old_confidence.get(fids_key)
         if prev_conf == ChainStatus.VALIDATED.value:
             chain.confidence = ChainStatus.VALIDATED

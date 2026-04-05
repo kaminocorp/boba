@@ -72,7 +72,7 @@ class NucleiAdapter(BaseAdapter):
             "finding_type": raw.get("type", ""),
             "host": raw.get("host", ""),
             "url": raw.get("matched-at", raw.get("host", "")),
-            "extracted_results": raw.get("extracted-results") or [],
+            "extracted_results": raw.get("extracted-results") if isinstance(raw.get("extracted-results"), list) else [],
             "curl_command": raw.get("curl-command", ""),
             "description": info.get("description", ""),
             "reference": info.get("reference") or [],

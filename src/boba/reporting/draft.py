@@ -64,6 +64,9 @@ def draft_finding_report(
     if not isinstance(request_ids, list):
         request_ids = []
 
+    # Build evidence references from finding evidence
+    evidence_refs = _build_evidence_refs(finding)
+
     draft = ReportDraft(
         hunt_id=hunt_id,
         finding_id=finding_id,
@@ -76,6 +79,7 @@ def draft_finding_report(
         impact=impact,
         remediation=remediation,
         request_ids=request_ids,
+        evidence_refs=evidence_refs,
         status=ReportStatus.DRAFT,
     )
 
@@ -282,3 +286,18 @@ def _build_impact(finding: dict, ftype: str) -> str:
                 "potentially gaining administrative access to the application.",
     }
     return impact_templates.get(ftype, finding.get("description", "Security impact identified."))
+
+
+def _build_evidence_refs(finding: dict) -> list[str]:
+    """Extract evidence references from finding evidence array."""
+    refs: list[str] = []
+    evidence = finding.get("evidence")
+    if not isinstance(evidence, list):
+        return refs
+    for ev in evidence:
+        if not isinstance(ev, dict):
+            continue
+        note = ev.get("note")
+        if note and note not in refs:
+            refs.append(note)
+    return refs

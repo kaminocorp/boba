@@ -119,7 +119,7 @@ class TestHttpxRunnerAdapter:
         result = adapter.parse_record({})
         assert result["host"] == ""
         assert result["ip"] == ""
-        assert result["port"] is None
+        assert result["port"] == 0
         assert result["status_code"] is None
         assert result["technologies"] == []
         assert result["tls_version"] == ""

@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.9](#039--prod-gate-data-consistency--api-contract-fixes) — 5-agent parallel review (core, adapters, interaction/vuln, analysis/reporting, test suite): `check_duplicate()` returns complete finding groups (was missing caller's finding), report drafts populate `evidence_refs` from finding evidence (was always empty), PoC HTTP dumps use `"Unknown Status"` reason for non-standard codes (was empty string producing malformed HTTP), httpx adapter returns `""` for unresolvable IPs (was storing hostname as IP), nuclei `extracted_results` type-validated (rejects non-list), chain confidence key uses `tuple` (was fragile `str(sorted(...))`), httpx port normalized to `0` sentinel (was `None`, inconsistent with naabu). 7 fixes + 2 test updates, 0 regressions (592 tests)
 - [0.3.8](#038--pre-prod-data-integrity--security-hardening) — 4-agent parallel review: finding evidence stores `[]` not `"null"`, migration uses `with self._conn:` (not manual BEGIN/COMMIT), report upsert rejects both-NULL finding_id/chain_id (was silent duplicates), stored XSS scores higher than reflected (UI:N vs UI:R), extra_args flag injection blocked in base adapter, port/directory source provenance, hunt ID collision retry, CIDR-with-port scope classification fix. 10 fixes + 1 test update, 0 regressions (592 tests)
 - [0.3.7](#037--production-hardening--error-visibility) — 3-agent parallel review: finding persistence failure promoted to ERROR (was silent WARNING), coverage recording promoted to WARNING (was invisible DEBUG), subprocess graceful handling of missing/unexecutable binaries (exit 127/126 instead of traceback), context query methods now raise HuntNotFoundError for invalid hunt IDs (was silent empty results), WAL mode failure is now fatal RuntimeError (was silent warning). 5 fixes + 13 new tests, 0 regressions (592 tests)
 - [0.3.6](#036--data-integrity--detection-accuracy) — 4-agent parallel review: upsert COALESCE guards on ports/directories/findings (prevent NULL overwrites on re-scan), race condition false-positive reduction (filter 304/429 benign variance, add body-divergence confirmation), mass assignment non-JSON evidence logging, XSS DOM short-circuit removal (test all params), BrokenPipeError clean exit. 7 fixes, 0 regressions (579 tests)
@@ -32,6 +33,38 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.9 — Prod Gate: Data Consistency & API Contract Fixes
+
+**Date:** 2026-04-05
+**Scope:** 7 fixes across analysis, reporting, and adapters. 0 regressions (592 tests pass).
+
+5-agent parallel codebase review for final production gate assessment. Reviewed core layer, adapter layer, interaction/vuln layer, analysis/reporting layer, and full test suite (592 tests). Filtered ~60 raw findings down to 7 real issues — dismissed 50+ false positives (thread safety in documented single-threaded design, SQL injection in hardcoded column names, CSRF urlencode that correctly uses `doseq=True`, migration atomicity already handled by context manager). Post-fix assessment: 8.5/10 production-ready.
+
+### MEDIUM — Must-Fix (5 issues)
+
+1. **`check_duplicate()` returned incomplete `finding_ids`** (`dedup.py:237-241, 252-256`) — `DedupeGroup.finding_ids` only contained the existing finding's ID, not the new finding being checked. This broke the API contract that a `DedupeGroup` represents ALL members of the group. Fixed: both the existing and new finding IDs are now included (sorted, deduplicated).
+
+2. **Report drafts never populated `evidence_refs`** (`draft.py:67-80`) — The `evidence_refs` field defaulted to `[]` and was never set. The formatter checks `if report.evidence_refs:` to render the "Supporting Material/References" section, so it was always skipped. Fixed: new `_build_evidence_refs()` helper extracts notes from the finding's evidence array and populates the field.
+
+3. **PoC HTTP dumps produced malformed response lines for non-standard status codes** (`poc.py:159-165`) — When `status_code` was 0 (network error) or any unlisted code, `_REASONS.get(status, "")` returned an empty string, producing `"HTTP/1.1 0 "` — invalid HTTP that breaks PoC artifact usability. Fixed: default reason is now `"Unknown Status"`, and `.rstrip()` removed to preserve consistent formatting.
+
+4. **HttpxRunner stored hostname in `ip` field on DNS failure** (`httpx_runner.py:55`) — When `a_records` was an empty list (DNS resolution failed), the fallback `raw.get("host", "")` returned the input hostname, storing it in the `ip` field. Downstream IP-based scope filtering and reporting would get hostnames where they expect IPs. Fixed: fallback is now `""` (empty string), consistent with "unknown" semantics.
+
+5. **Nuclei `extracted_results` accepted non-list values** (`nuclei.py:75`) — `raw.get("extracted-results") or []` would pass through any truthy non-list (string, dict) from unexpected Nuclei output. Downstream code iterating `extracted_results` as a list would crash. Fixed: explicit `isinstance(..., list)` check.
+
+### LOW — Hardening (2 issues)
+
+6. **Chain confidence preservation key used `str(sorted(list))`** (`chaining.py:179-185`) — The key for matching old chain confidence relied on Python's string representation of sorted integer lists (`"[100, 200, 300]"`). While functionally correct, this is fragile and unconventional. Fixed: key is now `tuple(sorted(...))`, which is hashable, immutable, and semantically correct.
+
+7. **HttpxRunner port returned `None` vs naabu's `0`** (`httpx_runner.py:61`) — HttpxRunner returned `None` for missing port, while NaabuAdapter returned `0`. Consumers had to handle both sentinel values. Fixed: httpx now uses `_safe_int(...) or 0`, matching naabu's convention.
+
+### Test updates
+
+- `test_adapters.py::TestHttpxRunnerAdapter::test_parse_record_minimal` — Updated: `port` now asserts `== 0` (was `is None`).
+- `test_fixes_0217.py::TestHttpxRunnerTypeGuard::test_a_field_is_string` — Updated: `ip` now asserts `== ""` (was `== "example.com"` — the old test was asserting the *bug's* behavior).
 
 ---
 
