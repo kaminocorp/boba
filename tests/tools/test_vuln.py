@@ -460,8 +460,8 @@ class TestAuth:
             endpoint="https://app.example.com/admin/dashboard",
         )
         assert result.vulnerable is True
-        # Without a session to compare against, admin-like endpoint gives LIKELY
-        assert result.confidence == Confidence.LIKELY
+        # Without a session to compare against, admin-like endpoint gives POSSIBLE
+        assert result.confidence == Confidence.POSSIBLE
 
     @pytest.mark.asyncio
     async def test_auth_properly_enforced(self, sink):

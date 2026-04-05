@@ -940,7 +940,7 @@ async def test_auth(
         # or if the endpoint looks admin-like.
         if session or _ADMIN_RE.search(endpoint):
             vulnerable = True
-            confidence = Confidence.LIKELY if not session else Confidence.POSSIBLE
+            confidence = Confidence.LIKELY if session else Confidence.POSSIBLE
             evidence.append(
                 {
                     "type": "no_auth_access",

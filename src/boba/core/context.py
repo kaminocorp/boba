@@ -360,7 +360,7 @@ CREATE INDEX IF NOT EXISTS idx_coverage_test_type ON coverage(test_type);
 CREATE TABLE IF NOT EXISTS dedup_groups (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
-    canonical_id    INTEGER NOT NULL REFERENCES findings(id),
+    canonical_id    INTEGER NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
     finding_ids     TEXT NOT NULL DEFAULT '[]',
     reason          TEXT NOT NULL,
     created_at      TEXT NOT NULL,
@@ -394,8 +394,8 @@ CREATE INDEX IF NOT EXISTS idx_chains_severity ON chains(severity);
 CREATE TABLE IF NOT EXISTS reports (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     hunt_id             TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
-    finding_id          INTEGER REFERENCES findings(id),
-    chain_id            INTEGER REFERENCES chains(id),
+    finding_id          INTEGER REFERENCES findings(id) ON DELETE CASCADE,
+    chain_id            INTEGER REFERENCES chains(id) ON DELETE CASCADE,
     title               TEXT NOT NULL,
     severity            TEXT NOT NULL,
     cvss_score          REAL,

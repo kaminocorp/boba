@@ -75,15 +75,18 @@ def package_poc(
                         request_ids.extend(rids)
 
     # Write HTTP dumps
-    for i, rid in enumerate(request_ids, 1):
+    file_num = 0
+    for rid in request_ids:
         record = context.get_http_record(rid)
         if record:
             http_text = _format_http_dump(record)
-            dump_path = requests_dir / f"{i:03d}_request.http"
+            file_num += 1
+            dump_path = requests_dir / f"{file_num:03d}_request.http"
             try:
                 dump_path.write_text(http_text, encoding="utf-8")
             except OSError as exc:
                 logger.warning("Failed to write HTTP dump %s: %s", dump_path, exc)
+                file_num -= 1
                 continue
             package.http_dumps.append({
                 "request_id": rid,

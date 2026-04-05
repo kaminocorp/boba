@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.4.2](#042--prod-gate-confidence-accuracy--report-integrity) — Auth confidence inverted, PoC file numbering desync on missing/failed records, Bugcrowd formatter empty steps on single-step reports, missing FK CASCADE on dedup_groups/reports. 4 fixes, 0 regressions (592 tests)
 - [0.4.1](#041--prod-gate-detection-correctness--id-integrity) — Redirect detection completely broken (follow_redirects=True), upsert lastrowid undefined on update path, cross-type dedup suppressing distinct vulns, DOM XSS early exit, false chain rules, step ordering, adapter hardening. 11 fixes, 0 regressions (592 tests)
 - [0.4.0](#040--prod-gate-final-boundary-safety--cache-consistency) — Session cache invalidation bug, nuclei/httpx/whatweb type coercion at parse boundaries, evidence serialization clarity, migration idempotency guard. 6 fixes, 0 regressions (592 tests)
 - [0.3.9](#039--prod-gate-data-consistency--api-contract-fixes) — Dedup group completeness, report evidence_refs population, PoC HTTP status formatting, httpx IP/port normalization, nuclei type safety, chain key robustness. 7 fixes, 0 regressions (592 tests)
@@ -35,6 +36,31 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.4.2 — Prod Gate: Confidence Accuracy & Report Integrity
+
+**Date:** 2026-04-05
+**Scope:** 4 fixes across vuln detection, reporting, persistence. 0 regressions (592 tests pass).
+
+Full 5-agent parallel codebase review (core, adapters, interaction/vuln, analysis/reporting/CLI, test suite). Assessed ~60 raw findings, dismissed ~56 as non-issues (target injection requires attacker control of scope engine output, OOB substring collision impossible with uuid4 hex IDs, dynamic SQL uses hardcoded table constants, cross-host chain first-match is by design, JSON body similarity comma split is intentional heuristic). Post-fix assessment: 8.5+/10 production-ready.
+
+### HIGH — Auth Test Confidence Inverted
+
+1. **`test_auth` confidence values were backwards** (`vuln.py:943`) — When no session was provided (weaker evidence — cannot A/B compare authenticated vs unauthenticated responses), confidence was set to `LIKELY`. When a session was provided (stronger evidence — proper baseline comparison), confidence was `POSSIBLE`. This is inverted: stronger evidence should produce higher confidence. The existing unit test encoded the buggy behavior with a matching incorrect comment. Fixed: flipped the condition so session-backed findings get `LIKELY` and session-less findings get `POSSIBLE`. Updated test assertion and comment.
+
+### MEDIUM — PoC File Numbering Desync (2 paths)
+
+2. **PoC HTTP dump files had gaps and mismatched numbering** (`poc.py:78-87`) — `enumerate(request_ids, 1)` incremented the file counter even when `get_http_record()` returned `None` (missing record) or `write_text()` raised `OSError` (disk error). Files were numbered `001, 003, 004` with gaps, but the `http_dumps` list had no gaps — the mapping between filenames and list entries broke. Users got PoC packages where `002_request.http` contained a different request than what the README referenced. Fixed: replaced `enumerate` with a manual `file_num` counter that only increments on successful record retrieval and decrements on write failure.
+
+### MEDIUM — Bugcrowd Formatter Empty Steps Section
+
+3. **Single-step reports produced empty "Steps to Reproduce" in Bugcrowd format** (`formatter.py:99-102`) — When `has_location=True` and the report had exactly one step, `report.steps[1:]` was empty. The sole step was consumed as the Location header with nothing left for the Steps section. Fixed: added `len(report.steps) > 1` guard so single-step reports keep their step visible instead of producing an empty section.
+
+### LOW — Missing FK CASCADE on dedup_groups and reports
+
+4. **`dedup_groups.canonical_id` and `reports.finding_id/chain_id` lacked ON DELETE CASCADE** (`context.py:363, 397-398`) — These foreign keys referenced `findings(id)` and `chains(id)` without cascade. While no `delete_finding()` method exists today, any future deletion of individual findings would produce `FOREIGN KEY constraint failed` errors from orphaned references. Fixed: added `ON DELETE CASCADE` to all three FK constraints to match the pattern used by all other FK references in the schema.
 
 ---
 
