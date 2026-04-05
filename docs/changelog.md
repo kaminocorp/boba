@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.4.0](#040--prod-gate-final-boundary-safety--cache-consistency) — Session cache invalidation bug, nuclei/httpx/whatweb type coercion at parse boundaries, evidence serialization clarity, migration idempotency guard. 6 fixes, 0 regressions (592 tests)
 - [0.3.9](#039--prod-gate-data-consistency--api-contract-fixes) — Dedup group completeness, report evidence_refs population, PoC HTTP status formatting, httpx IP/port normalization, nuclei type safety, chain key robustness. 7 fixes, 0 regressions (592 tests)
 - [0.3.8](#038--pre-prod-data-integrity--security-hardening) — Evidence `[]` not `"null"`, migration context manager, report NULL dedup, stored XSS scoring, extra_args flag injection block, source provenance, hunt ID retry, CIDR-port fix. 10 fixes (592 tests)
 - [0.3.7](#037--production-hardening--error-visibility) — Finding persistence → ERROR, coverage → WARNING, missing-binary graceful exit (127/126), HuntNotFoundError on invalid queries, WAL failure → RuntimeError. 5 fixes + 13 tests (592 tests)
@@ -33,6 +34,41 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.4.0 — Prod Gate: Final Boundary Safety & Cache Consistency
+
+**Date:** 2026-04-05
+**Scope:** 6 fixes across session management, adapters, core persistence. 0 regressions (592 tests pass).
+
+4-agent parallel codebase review (core, adapters, tools/CLI/interaction/analysis, test suite). Focused on type safety at tool output boundaries, cache coherence, and migration resilience. Reviewed and dismissed ~30 findings as non-issues (OOB poll already has deadline, migration already atomic via `with self._conn:`, `lastrowid or 0` callers don't depend on return, SQL f-string table names are whitelist-controlled). Post-fix assessment: 8.5/10 production-ready.
+
+### BUG — Session Cache Staleness
+
+1. **`invalidate()` left stale `valid=True` in cache** (`session.py:204-208`) — `invalidate()` called `_get_or_raise()` which returns a deep copy from cache, so `state.is_valid = False` modified the copy and `_persist()` wrote to DB, but the original cached object stayed `is_valid=True`. Any subsequent `get()` or `apply_to_headers()` returned the stale valid session. Fixed: cache entry is now updated after persist. Note: `delete()` already did this correctly via `self._cache.pop()`.
+
+### MEDIUM — Type Safety at Parse Boundaries (3 issues)
+
+2. **Nuclei `reference`/`tags` accepted non-list values** (`nuclei.py:78-79`) — `info.get("reference") or []` passed through truthy non-list types (string URL, dict). Downstream code iterating these fields as lists would crash or produce wrong results. Fixed: explicit `isinstance(..., list)` guard, falls back to `[]`.
+
+3. **httpx `tls_version` could be `None`** (`httpx_runner.py:57`) — When httpx returned `{"tls": {"version": null}}`, `.get("version", "")` returned `None` (key exists, value is null), not the default `""`. Downstream string operations on the field would fail. Fixed: `(tls.get("version") or "")` coerces `None` to empty string.
+
+4. **WhatWeb `version`/`detail` could be `None`** (`whatweb.py:51-55`) — If whatweb returned `{"version": [null]}`, `versions[0]` stored `None` in the technology record. Fixed: explicit `str(v) if v is not None else ""` coercion.
+
+### LOW — Defensive Hardening (2 issues)
+
+5. **Evidence serialization used falsy catch-all** (`context.py:1239-1245`) — The `if finding.get("evidence")` condition treated any falsy evidence (empty string `""`, integer `0`) the same as `None`, silently dropping it. Fixed: explicit `is None` check so only truly absent evidence becomes `[]`.
+
+6. **Migration recovery guard for `_findings_old` table** (`context.py:449+`) — While SQLite WAL journaling ensures the migration transaction is atomic, a leftover `_findings_old` table from manual DB edits or external corruption could confuse startup. Added: pre-migration check that detects and cleans up orphaned temp tables before proceeding.
+
+### Reviewed & Confirmed Safe (no fix needed)
+
+- **SQL injection in `get_hunt_stats()`** — table names interpolated via f-string but controlled by `_STATS_TABLES` frozenset (whitelist). Safe.
+- **OOB poll() timeout** — `poll()` uses `time.monotonic() + timeout_seconds` deadline internally. Not missing a timeout.
+- **Migration atomicity** — `with self._conn:` is SQLite's transaction context manager; interrupted migrations roll back via WAL journal.
+- **Thread safety** — documented single-threaded design, enforced by sqlite3 `check_same_thread=True`.
+- **`lastrowid or 0` pattern** — all call sites verified; no caller relies on return value to detect skipped inserts.
 
 ---
 

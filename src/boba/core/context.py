@@ -446,6 +446,20 @@ class HuntContext:
         Uses explicit transaction (BEGIN/COMMIT) around the table rebuild to
         ensure atomicity — an interrupted migration will roll back cleanly.
         """
+        # Clean up leftover temp table from a prior interrupted migration (shouldn't
+        # happen with WAL journaling, but guard against manual DB edits).
+        existing_tables = {
+            r[0] for r in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "_findings_old" in existing_tables and "findings" not in existing_tables:
+            self._conn.execute("ALTER TABLE _findings_old RENAME TO findings")
+            self._conn.commit()
+        elif "_findings_old" in existing_tables:
+            self._conn.execute("DROP TABLE _findings_old")
+            self._conn.commit()
+
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(findings)").fetchall()}
         if "method" not in columns:
             logger.info("Migrating findings table: adding 'method' column + updated UNIQUE")
@@ -1239,9 +1253,9 @@ class HuntContext:
                 json.dumps(
                     finding["evidence"]
                     if isinstance(finding.get("evidence"), list)
-                    else [finding["evidence"]]
-                    if finding.get("evidence")
                     else []
+                    if finding.get("evidence") is None
+                    else [finding["evidence"]]
                 ),
                 json.dumps(finding.get("request_ids", [])),
                 finding.get("tool_run_id"),

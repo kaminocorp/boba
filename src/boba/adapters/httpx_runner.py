@@ -54,7 +54,7 @@ class HttpxRunnerAdapter(BaseAdapter):
         a_records = raw.get("a")
         ip = a_records[0] if isinstance(a_records, list) and a_records else ""
         tls = raw.get("tls")
-        tls_version = tls.get("version", "") if isinstance(tls, dict) else ""
+        tls_version = (tls.get("version") or "") if isinstance(tls, dict) else ""
         return {
             "host": raw.get("input", ""),
             "ip": ip,

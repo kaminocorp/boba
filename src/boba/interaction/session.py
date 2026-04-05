@@ -206,6 +206,7 @@ class SessionManager:
         state = self._get_or_raise(session_name)
         state.is_valid = False
         self._persist(state)
+        self._cache[session_name] = state
 
     # ── Internal ──
 

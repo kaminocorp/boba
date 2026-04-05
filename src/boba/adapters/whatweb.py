@@ -49,10 +49,12 @@ class WhatwebAdapter(BaseAdapter):
             if isinstance(details, dict):
                 versions = details.get("version", [])
                 if versions:
-                    tech["version"] = versions[0] if isinstance(versions, list) else str(versions)
+                    v = versions[0] if isinstance(versions, list) else versions
+                    tech["version"] = str(v) if v is not None else ""
                 strings = details.get("string", [])
                 if strings:
-                    tech["detail"] = strings[0] if isinstance(strings, list) else str(strings)
+                    s = strings[0] if isinstance(strings, list) else strings
+                    tech["detail"] = str(s) if s is not None else ""
             technologies.append(tech)
 
         target = raw.get("target", "")
