@@ -449,51 +449,49 @@ class HuntContext:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(findings)").fetchall()}
         if "method" not in columns:
             logger.info("Migrating findings table: adding 'method' column + updated UNIQUE")
-            self._conn.execute("BEGIN")
             try:
-                self._conn.execute("ALTER TABLE findings RENAME TO _findings_old")
-                self._conn.execute("""
-                    CREATE TABLE findings (
-                        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                        hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
-                        finding_type     TEXT NOT NULL,
-                        severity         TEXT NOT NULL DEFAULT 'info',
-                        title            TEXT NOT NULL,
-                        description      TEXT,
-                        url              TEXT,
-                        endpoint         TEXT,
-                        parameter        TEXT NOT NULL DEFAULT '',
-                        method           TEXT NOT NULL DEFAULT '',
-                        evidence         TEXT,
-                        request_ids      TEXT DEFAULT '[]',
-                        tool_run_id      INTEGER REFERENCES tool_runs(id),
-                        confirmed        INTEGER DEFAULT 0,
-                        false_positive   INTEGER DEFAULT 0,
-                        reported         INTEGER DEFAULT 0,
-                        template_id      TEXT,
-                        tags             TEXT DEFAULT '[]',
-                        created_at       TEXT NOT NULL,
-                        updated_at       TEXT NOT NULL,
-                        UNIQUE(hunt_id, finding_type, url, method, parameter)
-                    )
-                """)
-                self._conn.execute("""
-                    INSERT INTO findings
-                        (id, hunt_id, finding_type, severity, title, description,
-                         url, endpoint, parameter, method, evidence, request_ids,
-                         tool_run_id, confirmed, false_positive, reported,
-                         template_id, tags, created_at, updated_at)
-                    SELECT
-                        id, hunt_id, finding_type, severity, title, description,
-                        url, endpoint, parameter, '', evidence, request_ids,
-                        tool_run_id, confirmed, false_positive, reported,
-                        template_id, tags, created_at, updated_at
-                    FROM _findings_old
-                """)
-                self._conn.execute("DROP TABLE _findings_old")
-                self._conn.execute("COMMIT")
+                with self._conn:
+                    self._conn.execute("ALTER TABLE findings RENAME TO _findings_old")
+                    self._conn.execute("""
+                        CREATE TABLE findings (
+                            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                            hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+                            finding_type     TEXT NOT NULL,
+                            severity         TEXT NOT NULL DEFAULT 'info',
+                            title            TEXT NOT NULL,
+                            description      TEXT,
+                            url              TEXT,
+                            endpoint         TEXT,
+                            parameter        TEXT NOT NULL DEFAULT '',
+                            method           TEXT NOT NULL DEFAULT '',
+                            evidence         TEXT,
+                            request_ids      TEXT DEFAULT '[]',
+                            tool_run_id      INTEGER REFERENCES tool_runs(id),
+                            confirmed        INTEGER DEFAULT 0,
+                            false_positive   INTEGER DEFAULT 0,
+                            reported         INTEGER DEFAULT 0,
+                            template_id      TEXT,
+                            tags             TEXT DEFAULT '[]',
+                            created_at       TEXT NOT NULL,
+                            updated_at       TEXT NOT NULL,
+                            UNIQUE(hunt_id, finding_type, url, method, parameter)
+                        )
+                    """)
+                    self._conn.execute("""
+                        INSERT INTO findings
+                            (id, hunt_id, finding_type, severity, title, description,
+                             url, endpoint, parameter, method, evidence, request_ids,
+                             tool_run_id, confirmed, false_positive, reported,
+                             template_id, tags, created_at, updated_at)
+                        SELECT
+                            id, hunt_id, finding_type, severity, title, description,
+                            url, endpoint, parameter, '', evidence, request_ids,
+                            tool_run_id, confirmed, false_positive, reported,
+                            template_id, tags, created_at, updated_at
+                        FROM _findings_old
+                    """)
+                    self._conn.execute("DROP TABLE _findings_old")
             except Exception:
-                self._conn.execute("ROLLBACK")
                 raise
 
     def _maybe_commit(self) -> None:
@@ -1243,7 +1241,7 @@ class HuntContext:
                     if isinstance(finding.get("evidence"), list)
                     else [finding["evidence"]]
                     if finding.get("evidence")
-                    else None
+                    else []
                 ),
                 json.dumps(finding.get("request_ids", [])),
                 finding.get("tool_run_id"),
@@ -1702,10 +1700,12 @@ class HuntContext:
             # Chain-only report — target the partial index idx_reports_chain
             sql = f"""{_INSERT_COLS}
             ON CONFLICT(hunt_id, chain_id) WHERE finding_id IS NULL DO UPDATE SET{_UPDATE_SET}"""
-        else:
-            # Both set (or both NULL, which shouldn't happen) — use table constraint
+        elif finding_id is not None and chain_id is not None:
+            # Both set — use table constraint
             sql = f"""{_INSERT_COLS}
             ON CONFLICT(hunt_id, finding_id, chain_id) DO UPDATE SET{_UPDATE_SET}"""
+        else:
+            raise ValueError("upsert_report requires at least one of finding_id or chain_id")
 
         cursor = self._conn.execute(sql, values)
         self._conn.commit()

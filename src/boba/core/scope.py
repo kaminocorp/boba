@@ -254,7 +254,7 @@ class ScopeEngine:
             cleaned = cleaned.split(":")[0]
         # Check for IP or CIDR (e.g. 10.0.0.0/24) before treating / as URL
         try:
-            ipaddress.ip_network(cleaned if "/" not in cleaned else target, strict=False)
+            ipaddress.ip_network(cleaned if "/" not in cleaned else cleaned, strict=False)
             return "ip"
         except ValueError:
             pass

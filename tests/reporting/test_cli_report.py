@@ -111,7 +111,13 @@ class TestCLIReportList:
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
 
+        fid = mgr.context.upsert_finding(hunt.id, {
+            "finding_type": "xss", "severity": "high",
+            "title": "Stored XSS", "url": "https://app.example.com/comment",
+            "parameter": "body",
+        })
         mgr.context.upsert_report(hunt.id, {
+            "finding_id": fid,
             "title": "Test Report", "severity": "high", "status": "draft",
         })
         mgr.close_context()

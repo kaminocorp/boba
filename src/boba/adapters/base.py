@@ -256,6 +256,47 @@ class BaseAdapter(ABC):
 
         return records, parse_errors
 
+    # ── Phase 5b: extra_args sanitisation ──
+
+    # Flags that control output destination — allowing override would break
+    # parsing or write to arbitrary paths.  Checked case-insensitively.
+    _BLOCKED_EXTRA_FLAGS: frozenset[str] = frozenset(
+        {
+            "-o",
+            "--output",
+            "-oJ",
+            "-oA",
+            "-oN",
+            "-json",
+            "--json",
+            "--log-file",
+            "--store-response-dir",
+        }
+    )
+
+    @classmethod
+    def _sanitize_extra_args(cls, args: list[str]) -> list[str]:
+        """Strip output-redirect flags from extra_args to prevent override."""
+        cleaned: list[str] = []
+        skip_next = False
+        blocked = {f.lower() for f in cls._BLOCKED_EXTRA_FLAGS}
+        for arg in args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.lower() in blocked:
+                logger.warning("Stripped blocked extra_arg: %s", arg)
+                # If the flag takes a separate value, skip the next token too
+                if "=" not in arg:
+                    skip_next = True
+                continue
+            # Also catch --output=path style
+            if any(arg.lower().startswith(f"{f}=") for f in blocked):
+                logger.warning("Stripped blocked extra_arg: %s", arg)
+                continue
+            cleaned.append(arg)
+        return cleaned
+
     # ── Phase 6: Orchestration ──
 
     async def run(self, targets: list[str], config: AdapterConfig | None = None) -> ToolResult:
@@ -271,6 +312,7 @@ class BaseAdapter(ABC):
         8. return ToolResult
         """
         config = config or AdapterConfig()
+        config.extra_args = self._sanitize_extra_args(config.extra_args)
         self.find_binary()
 
         # Pre-filter

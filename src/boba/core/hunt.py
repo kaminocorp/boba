@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from boba.core.config import get_db_path
 from boba.core.context import HuntContext
 from boba.core.models import Hunt, HuntStatus, ScopeConfig
 from boba.core.scope import ScopeEngine
+
+_MAX_ID_RETRIES = 3
 
 
 class HuntManager:
@@ -36,14 +39,19 @@ class HuntManager:
         if scope is None:
             scope = ScopeConfig()
 
-        hunt = Hunt(
-            id=uuid.uuid4().hex[:12],
-            name=name,
-            scope=scope,
-            config=config or {},
-        )
-        self._context.create_hunt(hunt)
-        return hunt
+        for _ in range(_MAX_ID_RETRIES):
+            hunt = Hunt(
+                id=uuid.uuid4().hex[:12],
+                name=name,
+                scope=scope,
+                config=config or {},
+            )
+            try:
+                self._context.create_hunt(hunt)
+                return hunt
+            except sqlite3.IntegrityError:
+                continue
+        raise RuntimeError("failed to generate unique hunt ID after retries")
 
     def get(self, hunt_id: str) -> Hunt:
         return self._context.get_hunt(hunt_id)

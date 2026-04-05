@@ -38,7 +38,7 @@ async def directories(
     scope = ScopeEngine(hunt.scope)
     adapter = FfufAdapter(scope_engine=scope)
     result = await adapter.run(targets=[url], config=config)
-    context.upsert_records(hunt.id, "directory", result.records)
+    context.upsert_records(hunt.id, "directory", result.records, source="ffuf")
     context.log_tool_run(hunt.id, result)
     return result
 

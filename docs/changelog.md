@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.8](#038--pre-prod-data-integrity--security-hardening) — 4-agent parallel review: finding evidence stores `[]` not `"null"`, migration uses `with self._conn:` (not manual BEGIN/COMMIT), report upsert rejects both-NULL finding_id/chain_id (was silent duplicates), stored XSS scores higher than reflected (UI:N vs UI:R), extra_args flag injection blocked in base adapter, port/directory source provenance, hunt ID collision retry, CIDR-with-port scope classification fix. 10 fixes + 1 test update, 0 regressions (592 tests)
 - [0.3.7](#037--production-hardening--error-visibility) — 3-agent parallel review: finding persistence failure promoted to ERROR (was silent WARNING), coverage recording promoted to WARNING (was invisible DEBUG), subprocess graceful handling of missing/unexecutable binaries (exit 127/126 instead of traceback), context query methods now raise HuntNotFoundError for invalid hunt IDs (was silent empty results), WAL mode failure is now fatal RuntimeError (was silent warning). 5 fixes + 13 new tests, 0 regressions (592 tests)
 - [0.3.6](#036--data-integrity--detection-accuracy) — 4-agent parallel review: upsert COALESCE guards on ports/directories/findings (prevent NULL overwrites on re-scan), race condition false-positive reduction (filter 304/429 benign variance, add body-divergence confirmation), mass assignment non-JSON evidence logging, XSS DOM short-circuit removal (test all params), BrokenPipeError clean exit. 7 fixes, 0 regressions (579 tests)
 - [0.3.5](#035--final-prod-gate) — 6-agent parallel review: report upsert NULL dedup, scope enforcement on all 12 vuln tests, check_duplicate self-match, chain re-detection preserves validation, dedup cross-type false merge, finding parameter persistence, CSRF cross-origin body, SQLi time-based deadline, auth false-positive reduction, json_array_merge dedup, migration atomicity, subprocess zombie guard, fuzz baseline validity, OOB async/sync safety, reflected XSS scoring. 15 fixes, 0 regressions (579 tests)
@@ -31,6 +32,43 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.8 — Pre-Prod: Data Integrity & Security Hardening
+
+**Date:** 2026-04-05
+**Scope:** 10 fixes across core persistence, adapters, tools, and analysis. 0 regressions (592 tests pass).
+
+4-agent parallel codebase review for final production readiness assessment. Reviewed core layer (scope, context, models), adapter layer (all 9 adapters + base), tools + CLI, V3 features, and full test suite (592 tests). Filtered to 10 real issues — 5 MEDIUM, 5 LOW. Post-fix assessment: 8.5/10 production-ready.
+
+### MEDIUM — Must-Fix (5 issues)
+
+1. **Finding evidence stored `"null"` string instead of `"[]"`** (`context.py:1241-1247`) — When a finding had no evidence, `json.dumps(None)` produced the string `"null"`, not SQL NULL or `"[]"`. Any SQL query using `evidence IS NULL` wouldn't match these rows. Fixed: empty evidence now stores `"[]"` (empty JSON array) for consistent representation.
+
+2. **Migration used manual `BEGIN`/`COMMIT` inside Python's implicit transaction management** (`context.py:452-497`) — `_maybe_migrate()` called `self._conn.execute("BEGIN")` directly, relying on undocumented `executescript` auto-commit behavior. Could break on Python/SQLite version upgrades. Fixed: replaced with `with self._conn:` context manager, matching the pattern used everywhere else in the codebase.
+
+3. **Report upsert allowed both `finding_id` and `chain_id` to be NULL** (`context.py:1706-1708`) — SQLite treats NULL as distinct in UNIQUE constraints, so `UNIQUE(hunt_id, finding_id, chain_id)` wouldn't prevent duplicates when both were NULL. Fixed: `upsert_report()` now raises `ValueError` if neither is provided. Test updated to provide a valid finding_id.
+
+4. **Stored XSS scored identically to reflected XSS** (`severity.py:169-173`) — The stored XSS refinement set `attack_complexity="L"` but that was already the default, producing identical CVSS scores (6.1). The test used `>=` so the bug was masked. Fixed: stored/DOM XSS now sets `user_interaction="N"` (no victim click needed for persisted payload), producing a meaningfully higher score (8.2 vs 6.1).
+
+5. **`extra_args` flag injection in all adapters** (`base.py` + all 9 adapters) — `config.extra_args` was appended last to subprocess commands. CLI tools with last-wins semantics allowed callers to override adapter-controlled flags (e.g., `-o /tmp/evil` to redirect output). Fixed: new `_sanitize_extra_args()` classmethod in `BaseAdapter` strips output-redirect flags (`-o`, `--output`, `-oJ`, `--json`, `--log-file`, etc.) before command construction, with warning logs for stripped flags.
+
+### LOW — Hardening (5 issues)
+
+6. **Missing `source` on port upserts** (`tools/recon.py:96`) — `upsert_records()` for naabu results omitted `source="naabu"`, breaking provenance tracking. Fixed.
+
+7. **Missing `source` on directory upserts** (`tools/enum.py:41`) — Same pattern: `upsert_records()` for ffuf results omitted `source="ffuf"`. Fixed.
+
+8. **Hunt ID collision with no retry** (`hunt.py:40`) — `uuid4().hex[:12]` (48-bit entropy) has ~50% collision chance at ~16M hunts. The `INSERT` would fail with an unhandled `IntegrityError`. Fixed: retry loop (3 attempts) with clean `RuntimeError` on exhaustion.
+
+9. **CIDR-with-port misclassified as subdomain** (`scope.py:257`) — When target was `10.0.0.0:8080/24`, port stripping produced `cleaned="10.0.0.0"` but the CIDR path passed the original `target` (with port) to `ip_network()`, causing parse failure and fallback to `"subdomain"`. Fixed: CIDR path now uses `cleaned` consistently.
+
+10. **Naabu port=0 fallback** — Preserved existing behavior (`_safe_int(raw.get("port")) or 0`) after analysis confirmed port 0 is a safe sentinel for missing data. No change needed; documented as reviewed.
+
+### Test updates
+
+- `test_cli_report.py::TestCLIReportList::test_list_reports` — Updated to create a finding before creating a report (matching new validation that reports must reference a finding or chain).
 
 ---
 

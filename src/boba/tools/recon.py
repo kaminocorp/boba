@@ -93,7 +93,7 @@ async def ports(
     scope = ScopeEngine(hunt.scope)
     adapter = NaabuAdapter(scope_engine=scope)
     result = await adapter.run(targets=targets, config=config)
-    context.upsert_records(hunt.id, "port", result.records)
+    context.upsert_records(hunt.id, "port", result.records, source="naabu")
     context.log_tool_run(hunt.id, result)
     return result
 
