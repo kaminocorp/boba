@@ -45,13 +45,30 @@ async def run_subprocess(
     start = time.monotonic()
     timed_out = False
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.PIPE if stdin_data else asyncio.subprocess.DEVNULL,
-        env=env,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE if stdin_data else asyncio.subprocess.DEVNULL,
+            env=env,
+        )
+    except FileNotFoundError:
+        return SubprocessResult(
+            exit_code=127,
+            stdout="",
+            stderr=f"Command not found: {cmd[0]}",
+            duration=time.monotonic() - start,
+            timed_out=False,
+        )
+    except PermissionError:
+        return SubprocessResult(
+            exit_code=126,
+            stdout="",
+            stderr=f"Permission denied: {cmd[0]}",
+            duration=time.monotonic() - start,
+            timed_out=False,
+        )
 
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []

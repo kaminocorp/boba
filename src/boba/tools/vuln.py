@@ -77,7 +77,7 @@ def _record_coverage(
             },
         )
     except Exception as exc:
-        logger.debug("Failed to record coverage for %s %s: %s", test_type, url, exc)
+        logger.warning("Failed to record coverage for %s %s: %s", test_type, url, exc)
 
 
 def _persist_finding(
@@ -108,7 +108,9 @@ def _persist_finding(
             },
         )
     except Exception as exc:
-        logger.warning("Failed to persist finding for %s %s: %s", result.test_type, url, exc)
+        logger.error(
+            "Finding detected but NOT persisted for %s %s: %s", result.test_type, url, exc
+        )
         return None
 
 

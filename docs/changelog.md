@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.3.7](#037--production-hardening--error-visibility) — 3-agent parallel review: finding persistence failure promoted to ERROR (was silent WARNING), coverage recording promoted to WARNING (was invisible DEBUG), subprocess graceful handling of missing/unexecutable binaries (exit 127/126 instead of traceback), context query methods now raise HuntNotFoundError for invalid hunt IDs (was silent empty results), WAL mode failure is now fatal RuntimeError (was silent warning). 5 fixes + 13 new tests, 0 regressions (592 tests)
 - [0.3.6](#036--data-integrity--detection-accuracy) — 4-agent parallel review: upsert COALESCE guards on ports/directories/findings (prevent NULL overwrites on re-scan), race condition false-positive reduction (filter 304/429 benign variance, add body-divergence confirmation), mass assignment non-JSON evidence logging, XSS DOM short-circuit removal (test all params), BrokenPipeError clean exit. 7 fixes, 0 regressions (579 tests)
 - [0.3.5](#035--final-prod-gate) — 6-agent parallel review: report upsert NULL dedup, scope enforcement on all 12 vuln tests, check_duplicate self-match, chain re-detection preserves validation, dedup cross-type false merge, finding parameter persistence, CSRF cross-origin body, SQLi time-based deadline, auth false-positive reduction, json_array_merge dedup, migration atomicity, subprocess zombie guard, fuzz baseline validity, OOB async/sync safety, reflected XSS scoring. 15 fixes, 0 regressions (579 tests)
 - [0.3.4](#034--prod-readiness-review) — 4-agent parallel review: chain deletion data loss, race test gather crash, scope bypass via empty-string fallback, ffuf empty-targets crash, scope None guard, dedup O(n)->O(1) via json_each, vuln finding persistence pipeline, PoC I/O resilience, public finding API. 9 fixes, 0 regressions (579 tests)
@@ -30,6 +31,36 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.3.7 — Production Hardening: Error Visibility
+
+**Date:** 2026-04-05
+**Scope:** 5 fixes across core persistence, subprocess, and vuln tools. 0 regressions (592 tests pass).
+
+3-agent parallel codebase review for production readiness assessment. Filtered ~50 raw findings down to 5 real issues (dismissed 10+ false positives — e.g., "SQL injection" in hardcoded column names, "thread safety" in documented single-threaded design). Theme: silent failures that mask real problems in production — errors logged too quietly, missing binaries crashing with tracebacks, invalid hunt IDs returning empty results instead of errors, and WAL mode failures going unnoticed. Post-fix score: 9/10.
+
+### Tier 1 — Must-Fix (3 issues)
+
+1. **`_persist_finding()` swallowed DB errors at WARNING level** (`vuln.py:110-111`) — When a vulnerability was detected but the database write failed (e.g., disk full, schema mismatch), the finding was silently lost. The test reported `vulnerable=True` but nothing was persisted. Promoted to `logger.error()` with explicit "NOT persisted" message so operators can detect data loss in production logs.
+
+2. **`run_subprocess()` crashed with raw traceback on missing binaries** (`subprocess.py:48-54`) — If a tool (subfinder, naabu, etc.) was not installed or lacked execute permissions, `asyncio.create_subprocess_exec()` raised `FileNotFoundError` or `PermissionError` with no context. Now catches both and returns a structured `SubprocessResult` with exit code 127 (not found) or 126 (permission denied) — matching POSIX shell conventions. Adapters handle this gracefully via their existing non-zero exit code path.
+
+3. **Context query methods returned empty results for invalid hunt IDs** (`context.py:835-910`) — `get_subdomains()`, `get_hosts()`, `get_ports()`, `get_urls()`, `get_technologies()`, `get_directories()`, and `get_tool_runs()` silently returned `[]` for non-existent hunt IDs. Added `_ensure_hunt()` validation that raises `HuntNotFoundError` — consistent with `get_hunt()` behavior and surfaced clearly in the CLI.
+
+### Tier 2 — Should-Fix (2 issues)
+
+4. **`_record_coverage()` logged failures at DEBUG level** (`vuln.py:79-80`) — Coverage write failures were invisible unless running with `--log-level debug`. Promoted to `logger.warning()` so production operators see coverage gaps without enabling verbose logging.
+
+5. **WAL mode failure silently fell back to DELETE journal mode** (`context.py:425-427`) — If SQLite couldn't enable WAL mode (read-only filesystem, permissions issue), it logged a warning and continued with the slower, less concurrent-friendly DELETE journal mode. This could cause `SQLITE_BUSY` errors during parallel adapter runs that would be very hard to diagnose. Now raises `RuntimeError` with actionable message about checking permissions and disk space.
+
+### Regression tests (`tests/test_fixes_0218.py` — 13 new tests)
+
+- `TestVulnPersistenceLogging` (2 tests) — Verify `_persist_finding` logs at ERROR, `_record_coverage` at WARNING
+- `TestSubprocessMissingBinary` (2 tests) — Verify exit 127 for missing binary, exit 126 for permission denied
+- `TestContextQueryValidation` (8 tests) — Verify HuntNotFoundError on all 7 query methods + normal queries still work
+- `TestWALModeEnforcement` (1 test) — Verify RuntimeError when WAL mode cannot be enabled
 
 ---
 

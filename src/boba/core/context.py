@@ -424,7 +424,10 @@ class HuntContext:
 
         result = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
         if result[0].upper() != "WAL":
-            logger.warning("Failed to enable WAL mode; got %s", result[0])
+            raise RuntimeError(
+                f"Failed to enable SQLite WAL mode (got '{result[0]}'). "
+                "Check database file permissions and available disk space."
+            )
 
         self._conn.execute("PRAGMA foreign_keys=ON")
         fk = self._conn.execute("PRAGMA foreign_keys").fetchone()
@@ -832,13 +835,23 @@ class HuntContext:
 
     # ═══════════════════ QUERIES ═══════════════════
 
+    def _ensure_hunt(self, hunt_id: str) -> None:
+        """Raise HuntNotFoundError if hunt_id does not exist."""
+        row = self._conn.execute(
+            "SELECT 1 FROM hunts WHERE id = ?", (hunt_id,)
+        ).fetchone()
+        if not row:
+            raise HuntNotFoundError(f"Hunt '{hunt_id}' not found")
+
     def get_subdomains(self, hunt_id: str) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         rows = self._conn.execute(
             "SELECT * FROM subdomains WHERE hunt_id = ? ORDER BY subdomain", (hunt_id,)
         ).fetchall()
         return [dict(r) for r in rows]
 
     def get_hosts(self, hunt_id: str, alive_only: bool = False) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         sql = "SELECT * FROM hosts WHERE hunt_id = ?"
         if alive_only:
             sql += " AND status_code IS NOT NULL AND status_code > 0"
@@ -847,6 +860,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def get_ports(self, hunt_id: str, host: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         if host:
             rows = self._conn.execute(
                 "SELECT * FROM ports WHERE hunt_id = ? AND host = ? ORDER BY port",
@@ -859,6 +873,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def get_urls(self, hunt_id: str, host: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         if host:
             rows = self._conn.execute(
                 "SELECT * FROM urls WHERE hunt_id = ? AND host = ? ORDER BY url",
@@ -871,6 +886,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def get_technologies(self, hunt_id: str, host: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         if host:
             rows = self._conn.execute(
                 "SELECT * FROM technologies WHERE hunt_id = ? AND host = ? ORDER BY name",
@@ -883,6 +899,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def get_directories(self, hunt_id: str, url_prefix: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         if url_prefix:
             # Escape LIKE wildcards (% and _) so caller input is matched literally
             escaped = url_prefix.replace("%", "\\%").replace("_", "\\_")
@@ -897,6 +914,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def get_tool_runs(self, hunt_id: str) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
         rows = self._conn.execute(
             "SELECT * FROM tool_runs WHERE hunt_id = ? ORDER BY started_at DESC", (hunt_id,)
         ).fetchall()
