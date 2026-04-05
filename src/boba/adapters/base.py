@@ -280,18 +280,26 @@ class BaseAdapter(ABC):
         cleaned: list[str] = []
         skip_next = False
         blocked = {f.lower() for f in cls._BLOCKED_EXTRA_FLAGS}
+        # Short flags (1-3 chars after dash) that may have concatenated values
+        # e.g. -o/tmp/evil or -oJ — detect via prefix match
+        short_blocked = {f for f in blocked if len(f) <= 3 and f.startswith("-") and not f.startswith("--")}
         for arg in args:
             if skip_next:
                 skip_next = False
                 continue
-            if arg.lower() in blocked:
+            lower = arg.lower()
+            if lower in blocked:
                 logger.warning("Stripped blocked extra_arg: %s", arg)
                 # If the flag takes a separate value, skip the next token too
                 if "=" not in arg:
                     skip_next = True
                 continue
-            # Also catch --output=path style
-            if any(arg.lower().startswith(f"{f}=") for f in blocked):
+            # Catch --output=path and -o=path style
+            if any(lower.startswith(f"{f}=") for f in blocked):
+                logger.warning("Stripped blocked extra_arg: %s", arg)
+                continue
+            # Catch concatenated short flags: -o/tmp/evil, -oJfile.json
+            if any(lower.startswith(f) and len(lower) > len(f) for f in short_blocked):
                 logger.warning("Stripped blocked extra_arg: %s", arg)
                 continue
             cleaned.append(arg)

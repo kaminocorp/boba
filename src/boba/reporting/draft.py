@@ -121,7 +121,7 @@ def draft_chain_report(
     impact = chain.get("impact", "")
 
     # Merge steps from all chained findings
-    finding_ids = chain.get("finding_ids", [])
+    finding_ids = chain.get("chain_order", []) or chain.get("finding_ids", [])
     all_steps: list[str] = []
     all_request_ids: list[int] = []
 

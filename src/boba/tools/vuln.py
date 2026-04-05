@@ -608,6 +608,7 @@ async def test_xss(
     # DOM-based XSS check via browser (runs for all params, even if reflected was found,
     # because DOM-based XSS on param B is a distinct finding from reflected on param A).
     if check_dom and browser:
+        dom_found = False
         for param_name in test_params:
             for canary in xss_payloads.DOM_CANARY:
                 test_url = _inject_param(url, param_name, canary)
@@ -620,6 +621,7 @@ async def test_xss(
                 )
                 if fired:
                     vulnerable = True
+                    dom_found = True
                     confidence = Confidence.CONFIRMED
                     evidence.append(
                         {
@@ -630,7 +632,7 @@ async def test_xss(
                         }
                     )
                     break
-            if vulnerable:
+            if dom_found:
                 break
 
     result = VulnTestResult(
@@ -1094,7 +1096,7 @@ async def test_race(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="race_condition", vulnerable=False,
+            test_type="race", vulnerable=False,
             title=f"Race condition on {url}",
             description=f"Skipped: {url} is out of scope",
         )
@@ -1261,6 +1263,7 @@ async def test_redirect(
             url=test_url,
             headers=headers,
             cookies=cookies,
+            follow_redirects=False,
             source="test_redirect",
             tags=["redirect", param],
         )

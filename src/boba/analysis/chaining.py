@@ -62,7 +62,7 @@ CHAIN_RULES: list[ChainRule] = [
         min_findings=1,
         combined_severity=Severity.CRITICAL,
         impact="SQL injection may allow OS command execution via stacked queries",
-        evidence_keywords=["error_based", "time_based", "boolean_based"],
+        evidence_keywords=["stacked_queries", "file_write", "xp_cmdshell", "into_outfile", "load_file", "os_command"],
     ),
     ChainRule(
         name="auth_bypass_admin",
@@ -89,7 +89,7 @@ CHAIN_RULES: list[ChainRule] = [
         min_findings=1,
         combined_severity=Severity.HIGH,
         impact="XSS can steal session cookies, enabling account takeover",
-        evidence_keywords=["reflected", "dom_based", "stored", "cookie", "session"],
+        evidence_keywords=["cookie", "session", "httponly_false", "document.cookie", "set-cookie"],
     ),
     ChainRule(
         name="idor_plus_sqli",

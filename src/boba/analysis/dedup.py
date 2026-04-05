@@ -232,8 +232,8 @@ def check_duplicate(
         ef_method = ef.get("method", "")
         ef_type = _normalize_vuln_class(ef.get("finding_type", ""))
 
-        # Exact URL + method + parameter match (same or cross-type)
-        if ef_url == url and ef_method == method and ef_param == param:
+        # Exact URL + method + parameter match (same vuln class only)
+        if ef_url == url and ef_method == method and ef_param == param and ef_type == ftype:
             ids = sorted({ef["id"], finding_id}) if finding_id is not None else [ef["id"]]
             return DedupeGroup(
                 canonical_id=ef["id"],

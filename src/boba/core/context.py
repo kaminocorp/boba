@@ -26,6 +26,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _resolve_upsert_id(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    table: str,
+    where_clause: str,
+    params: tuple,
+) -> int:
+    """Resolve row ID after INSERT ON CONFLICT DO UPDATE.
+
+    SQLite's last_insert_rowid() is undefined on the update path of an
+    UPSERT. When lastrowid is falsy we fall back to a SELECT on the
+    unique-key columns.
+    """
+    row_id = cursor.lastrowid
+    if row_id:
+        return row_id
+    row = conn.execute(f"SELECT id FROM {table} WHERE {where_clause}", params).fetchone()
+    return row[0] if row else 0
+
+
 def _parse_json_field(
     value: str | None, default: str = "{}", *, label: str = "field", record_id: Any = "?"
 ) -> Any:
@@ -1269,7 +1289,14 @@ class HuntContext:
             ),
         )
         self._conn.commit()
-        return cursor.lastrowid or 0
+        return _resolve_upsert_id(
+            self._conn,
+            cursor,
+            "findings",
+            "hunt_id = ? AND finding_type = ? AND url = ? AND method = ? AND parameter = ?",
+            (hunt_id, finding["finding_type"], finding.get("url") or "",
+             finding.get("method") or "", finding.get("parameter") or ""),
+        )
 
     def get_findings(
         self,
@@ -1395,7 +1422,12 @@ class HuntContext:
             ),
         )
         self._maybe_commit()
-        return cursor.lastrowid or 0
+        return _resolve_upsert_id(
+            self._conn, cursor, "coverage",
+            "hunt_id = ? AND url = ? AND method = ? AND parameter = ? AND test_type = ?",
+            (hunt_id, entry["url"], entry.get("method", "GET"),
+             entry.get("parameter", ""), entry["test_type"]),
+        )
 
     def get_coverage(
         self,
@@ -1482,7 +1514,11 @@ class HuntContext:
             ),
         )
         self._conn.commit()
-        return cursor.lastrowid or 0
+        return _resolve_upsert_id(
+            self._conn, cursor, "dedup_groups",
+            "hunt_id = ? AND canonical_id = ?",
+            (hunt_id, group["canonical_id"]),
+        )
 
     def get_dedup_groups(self, hunt_id: str) -> list[dict[str, Any]]:
         """List all dedup groups for a hunt."""
@@ -1599,7 +1635,11 @@ class HuntContext:
             ),
         )
         self._conn.commit()
-        return cursor.lastrowid or 0
+        return _resolve_upsert_id(
+            self._conn, cursor, "chains",
+            "hunt_id = ? AND title = ?",
+            (hunt_id, chain["title"]),
+        )
 
     def get_chains(self, hunt_id: str, severity: str | None = None) -> list[dict[str, Any]]:
         """Query chains with optional severity filter."""
@@ -1723,7 +1763,26 @@ class HuntContext:
 
         cursor = self._conn.execute(sql, values)
         self._conn.commit()
-        return cursor.lastrowid or 0
+        row_id = cursor.lastrowid
+        if row_id:
+            return row_id
+        # Fallback: query by unique key for the update path
+        if finding_id is not None and chain_id is None:
+            row = self._conn.execute(
+                "SELECT id FROM reports WHERE hunt_id = ? AND finding_id = ? AND chain_id IS NULL",
+                (hunt_id, finding_id),
+            ).fetchone()
+        elif chain_id is not None and finding_id is None:
+            row = self._conn.execute(
+                "SELECT id FROM reports WHERE hunt_id = ? AND chain_id = ? AND finding_id IS NULL",
+                (hunt_id, chain_id),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT id FROM reports WHERE hunt_id = ? AND finding_id = ? AND chain_id = ?",
+                (hunt_id, finding_id, chain_id),
+            ).fetchone()
+        return row[0] if row else 0
 
     def get_reports(
         self,

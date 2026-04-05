@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.4.1](#041--prod-gate-detection-correctness--id-integrity) — Redirect detection completely broken (follow_redirects=True), upsert lastrowid undefined on update path, cross-type dedup suppressing distinct vulns, DOM XSS early exit, false chain rules, step ordering, adapter hardening. 11 fixes, 0 regressions (592 tests)
 - [0.4.0](#040--prod-gate-final-boundary-safety--cache-consistency) — Session cache invalidation bug, nuclei/httpx/whatweb type coercion at parse boundaries, evidence serialization clarity, migration idempotency guard. 6 fixes, 0 regressions (592 tests)
 - [0.3.9](#039--prod-gate-data-consistency--api-contract-fixes) — Dedup group completeness, report evidence_refs population, PoC HTTP status formatting, httpx IP/port normalization, nuclei type safety, chain key robustness. 7 fixes, 0 regressions (592 tests)
 - [0.3.8](#038--pre-prod-data-integrity--security-hardening) — Evidence `[]` not `"null"`, migration context manager, report NULL dedup, stored XSS scoring, extra_args flag injection block, source provenance, hunt ID retry, CIDR-port fix. 10 fixes (592 tests)
@@ -34,6 +35,45 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.4.1 — Prod Gate: Detection Correctness & ID Integrity
+
+**Date:** 2026-04-05
+**Scope:** 11 fixes across vuln detection, persistence, analysis, adapters. 0 regressions (592 tests pass).
+
+5-agent parallel codebase review (core, adapters, interaction/vuln, analysis/reporting, test coverage). Verified all findings against actual code before fixing. Dismissed COALESCE host upsert concern after confirming adapters return `""` (not NULL) for missing text fields. Post-fix assessment: 8.5+/10 production-ready.
+
+### CRITICAL — Redirect Detection Completely Broken
+
+1. **`test_redirect` always returned `vulnerable=False`** (`vuln.py:1259`) — `http_client.request()` used the default `follow_redirects=True`. The response seen by detection logic was the **final** response after all redirects (typically HTTP 200), so the `status_code in (301, 302, ...)` check at line 1276 never matched. Unit tests passed because they mock `client.request` to return a fabricated 302 directly. Fixed: now passes `follow_redirects=False` so the raw 3xx response is inspected.
+
+### HIGH — Upsert ID Integrity
+
+2. **`lastrowid` returned 0/undefined on upsert-update path** (`context.py`, 5 methods) — SQLite's `last_insert_rowid()` is undefined when `INSERT ON CONFLICT DO UPDATE` takes the update path. All upsert methods returned `cursor.lastrowid or 0`, which produced `0` on updates. Callers use the return value: `draft.id = context.upsert_report(...)`, `chain.id = context.upsert_chain(...)`, `return context.upsert_finding(...)`. Fixed: new `_resolve_upsert_id()` helper falls back to a SELECT on the unique-key columns when `lastrowid` is falsy. Applied to `upsert_finding`, `upsert_chain`, `upsert_report`, `upsert_coverage`, and `insert_dedup_group`. Note: `log_tool_run`, `insert_http_record`, and `insert_oob_listener` use plain INSERT (no ON CONFLICT) so `lastrowid` is always valid — left unchanged.
+
+### MEDIUM — Detection & Analysis Correctness (5 issues)
+
+3. **`check_duplicate` suppressed distinct vuln types at same URL** (`dedup.py:236`) — The exact URL+method+param match did not check `finding_type`, so an XSS and an IDOR at the same endpoint were flagged as duplicates. The host-level match at line 244 correctly checked type, but the exact-URL match didn't. Fixed: added `and ef_type == ftype` to the condition.
+
+4. **DOM XSS check exited early due to shared `vulnerable` flag** (`vuln.py:633`) — If reflected XSS set `vulnerable=True`, the DOM XSS param loop immediately broke after the first param iteration regardless of whether the DOM canary fired. DOM XSS on non-first parameters was never tested. Fixed: introduced `dom_found` flag; the outer loop now breaks on `dom_found` instead of the shared `vulnerable`.
+
+5. **Chain report steps in wrong order** (`draft.py:124`) — `draft_chain_report` iterated `finding_ids` (sorted by database ID, an artifact of insertion order) instead of `chain_order` (the intended attack sequence). A redirect→SSRF chain with lower SSRF ID would produce reversed reproduction steps. Fixed: now uses `chain_order` with fallback to `finding_ids`.
+
+6. **`xss_session_hijack` chain fired on ALL XSS findings** (`chaining.py:92`) — `evidence_keywords` included XSS type labels ("reflected", "dom_based", "stored") which appear in every XSS finding's evidence. Every XSS triggered a false "session hijack" chain. Fixed: removed type labels, now requires session-specific evidence ("cookie", "session", "httponly_false", "document.cookie", "set-cookie").
+
+7. **`sqli_to_rce` chain fired on any confirmed SQLi** (`chaining.py:65`) — `evidence_keywords` included standard detection methods ("error_based", "time_based", "boolean_based"), so every confirmed SQLi was promoted to CRITICAL "RCE" regardless of actual RCE evidence. Fixed: now requires RCE-specific evidence ("stacked_queries", "file_write", "xp_cmdshell", "into_outfile", "load_file", "os_command").
+
+### LOW — Adapter Hardening (4 issues)
+
+8. **`_sanitize_extra_args` bypass via concatenated short flags** (`base.py:278-298`) — `-o/tmp/evil` bypassed the sanitizer because it wasn't an exact match for `-o` and didn't contain `=`. Fixed: added prefix match for short flags (1-3 chars after dash) so `-o<anything>` is caught.
+
+9. **Nuclei `tags` always empty** (`nuclei.py:79`) — Nuclei sends tags as a comma-separated string (e.g., `"cve,rce,critical"`), not a list. The `isinstance(..., list)` guard discarded them. Fixed: parses CSV string into list when tags is a string.
+
+10. **httpx `status_code`/`content_length` not type-coerced** (`httpx_runner.py:64,68`) — Unlike `port` which gets `_safe_int()`, these numeric fields were passed through raw. If httpx returned them as strings, downstream integer comparisons would fail. Fixed: both now use `_safe_int()`.
+
+11. **Race condition scope-skip used wrong `test_type`** (`vuln.py:1097`) — The scope-skip early return used `test_type="race_condition"` while the normal result path and coverage recording used `"race"`. Fixed: unified to `"race"`.
 
 ---
 

@@ -76,7 +76,7 @@ class NucleiAdapter(BaseAdapter):
             "curl_command": raw.get("curl-command", ""),
             "description": info.get("description", ""),
             "reference": info.get("reference") if isinstance(info.get("reference"), list) else [],
-            "tags": info.get("tags") if isinstance(info.get("tags"), list) else [],
+            "tags": info.get("tags") if isinstance(info.get("tags"), list) else [t.strip() for t in info.get("tags", "").split(",") if t.strip()] if isinstance(info.get("tags"), str) else [],
             "matcher_name": raw.get("matcher-name", ""),
         }
 
