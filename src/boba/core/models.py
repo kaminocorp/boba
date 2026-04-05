@@ -256,6 +256,7 @@ class VulnTestResult:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     request_ids: list[int] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
+    waf_detected: bool = False
 
 
 # ──────────────────────────── V3: Analysis ───────────────────────────

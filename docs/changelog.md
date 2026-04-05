@@ -1,5 +1,8 @@
 # Changelog
 
+- [0.5.3](#053--v4-phase-3-parameter-discovery) — Arjun adapter for hidden parameter discovery, `parameters` table, prioritization integration, CLI commands. 1 adapter, 1 table, 0 regressions (627 tests)
+- [0.5.2](#052--v4-phase-2-ai-chain-rules) — 4 AI-aware chain rules, stable evidence type identifiers. Prompt injection findings now chain with XSS, auth bypass, tool abuse. 0 regressions (608 tests)
+- [0.5.1](#051--v4-phase-1-waf-detection) — `waf_detected` signal on VulnTestResult. All 11 vuln engines now distinguish WAF blocking from clean endpoints. 0 regressions (600 tests)
 - [0.5.0](#050--documentation--agent-readiness) — Agent orientation guide, V4 implementation plan, README/TLDR updated to reflect V3 completion. Documentation milestone, 0 code changes, 0 regressions (592 tests)
 - [0.4.2](#042--prod-gate-confidence-accuracy--report-integrity) — Auth confidence inverted, PoC file numbering desync on missing/failed records, Bugcrowd formatter empty steps on single-step reports, missing FK CASCADE on dedup_groups/reports. 4 fixes, 0 regressions (592 tests)
 - [0.4.1](#041--prod-gate-detection-correctness--id-integrity) — Redirect detection completely broken (follow_redirects=True), upsert lastrowid undefined on update path, cross-type dedup suppressing distinct vulns, DOM XSS early exit, false chain rules, step ordering, adapter hardening. 11 fixes, 0 regressions (592 tests)
@@ -37,6 +40,132 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.3 — V4 Phase 3: Parameter Discovery
+
+**Date:** 2026-04-05
+**Scope:** V4 enrichment Phase 3. New Arjun adapter discovers hidden HTTP parameters (query, body, header) on known endpoints, feeding all 11 vuln engines with previously invisible attack surface. 1 new adapter, 1 new table, ~19 new tests, 0 regressions (627 tests pass).
+
+Parameter discovery is the single highest-leverage addition in V4. Every vuln test requires knowing which parameters exist — without discovery, the agent only tests params visible in HTML forms and JS. The bugs that pay $5K+ live in hidden parameters: `debug`, `admin`, `internal`, `callback`, `redirect_url`, `role`.
+
+### NEW — ArjunAdapter
+
+> `src/boba/adapters/arjun.py`
+
+Full adapter implementation following the standard lifecycle (`build_command → parse_output → extract_scope_target`):
+
+- Supports GET, POST, and JSON body modes via `_resolve_mode()` mapping to Arjun's `-m` flag
+- `parse_output()` handles 4 JSON output shapes: single-target object, multi-target URL→params mapping, JSON array, and params as string or structured objects — Arjun's output varies by version and mode
+- Uses tempfile for `-oJ` output, `--stable` flag for rate-limited scanning
+- Registered in adapter registry (`adapters/__init__.py`)
+
+### NEW — `parameters` table
+
+> `src/boba/core/context.py`
+
+- Schema: `(hunt_id, url, method, name, param_type, sources, confirmed, created_at, updated_at)`
+- Unique constraint: `(hunt_id, url, method, name, param_type)` — same param name with different types (query vs body) gets separate rows
+- `upsert_parameter()`: merges sources via `json_group_array`, preserves strongest `confirmed` signal via `MAX()`
+- `get_parameters()`: filterable by URL and method
+- Indexed on `(hunt_id)` and `(hunt_id, url)`
+
+### NEW — `enum.parameters()` tool function
+
+> `src/boba/tools/enum.py`
+
+Composition function: scope check → ArjunAdapter.run() → persist via `upsert_records` → log tool run. Accepts `method` and `body_type` overrides via `AdapterConfig.extra_args_dict`.
+
+### UPDATED — Prioritization integration
+
+> `src/boba/analysis/prioritize.py`
+
+- Fetches discovered parameters and indexes by `_endpoint_key(url, method)` — normalizes URLs by stripping query strings so Arjun results on `/search` match stored URLs like `/search?q=test`
+- Score boost: +2.0 for any discovered params, +1.0 additional for confirmed params (response-change verified)
+- Body params on POST/PUT/PATCH endpoints add `mass_assign` to suggested tests
+- Reasons include `"Arjun found N parameter(s)"` and `"N parameter(s) confirmed by response change"`
+
+### NEW — CLI commands
+
+> `src/boba/cli/main.py`
+
+- `boba enum parameters <hunt-id> --url <url> [--method GET|POST] [--body-type json]` — run Arjun discovery
+- `boba context parameters <hunt-id> [--url <url>] [--method <method>]` — query persisted parameters
+
+---
+
+## 0.5.2 — V4 Phase 2: AI Chain Rules
+
+**Date:** 2026-04-05
+**Scope:** V4 enrichment Phase 2. 4 new AI-aware chain rules so prompt injection findings get chained and upgraded instead of staying standalone. Stable evidence type identifiers for Phase 6 forward compatibility. ~8 new tests, 0 regressions (608 tests pass).
+
+Before this change, the chaining engine had 8 rules but none involving AI findings. A prompt injection that leads to function calling abuse is a P1, but without chain rules it stayed classified as a standalone finding. Prompt injection is the fastest-growing vulnerability class (540% YoY) — the chaining engine needed to speak AI.
+
+### NEW — AI evidence type identifiers
+
+> `src/boba/payloads/ai.py`
+
+Added `EVIDENCE_TYPES` list — stable string identifiers that chain rules match against:
+
+- `instruction_override` — canary marker fired (existing detection)
+- `system_prompt_leak` — leak indicators scored (existing detection)
+- `function_call` — response contains tool/function invocations (Phase 6)
+- `tool_use` — response contains tool-use patterns (Phase 6)
+- `api_call` — response contains API call patterns (Phase 6)
+- `credential_leak` — response contains leaked credentials (Phase 6)
+
+### NEW — 4 chain rules
+
+> `src/boba/analysis/chaining.py`
+
+| Rule | Types | Constraint | Severity | When it fires |
+|---|---|---|---|---|
+| `ai_tool_abuse` | ai | evidence: function_call, tool_use, api_call | CRITICAL | Prompt injection triggers tool/API calls |
+| `ai_data_exfiltration` | ai | evidence: system_prompt_leak, credential_leak, api_key | HIGH | System prompt leak reveals secrets |
+| `xss_to_ai_injection` | xss + ai | same_host | CRITICAL | Stored XSS poisons LLM context |
+| `ai_plus_auth_bypass` | ai + auth | same_host | CRITICAL | Auth bypass + prompt injection on privileged AI features |
+
+Design note: `ai_tool_abuse` and `ai_data_exfiltration` are evidence-gated (require specific keywords in finding evidence), while `xss_to_ai_injection` and `ai_plus_auth_bypass` are type-gated (co-occurrence on the same host is sufficient). The plan's overly generic keywords (`"action"`, `"execute"`, `"database"`, `"internal"`) were trimmed to reduce false chain generation.
+
+---
+
+## 0.5.1 — V4 Phase 1: WAF Detection
+
+**Date:** 2026-04-05
+**Scope:** V4 enrichment Phase 1. All 11 vuln test functions now surface a `waf_detected` signal when responses suggest WAF blocking rather than clean results. ~8 new tests, 0 regressions (600 tests pass).
+
+Before this change, if a WAF blocked every payload, the result was just `vulnerable=False` — indistinguishable from "endpoint is clean." A skilled human pentester recognizes WAF responses instantly and switches to bypass techniques. The agent needs this signal too.
+
+### UPDATED — VulnTestResult model
+
+> `src/boba/core/models.py`
+
+Added `waf_detected: bool = False` — safe default preserves backward compatibility for all existing callers and JSON serialization.
+
+### NEW — WAF detection heuristic
+
+> `src/boba/tools/vuln.py`
+
+- `_WAF_STATUS_CODES`: `{403, 406, 429, 503}`
+- `_WAF_BODY_SIGNATURES`: 10 signatures — `"blocked"`, `"waf"`, `"firewall"`, `"cloudflare"`, `"akamai"`, `"incapsula"`, `"sucuri"`, `"mod_security"`, `"request blocked"`, `"security policy"`
+- `_detect_waf(responses)`: requires ≥3 responses, then two detection paths:
+  1. All responses have blocking status codes AND ≤2 unique response bodies AND at least one contains a WAF signature
+  2. Every response contains a WAF signature regardless of status code
+
+Design note: the plan's original signature list included `"forbidden"`, `"access denied"`, and `"not acceptable"` — these were dropped because they appear in normal 403 responses without any WAF being present. The conservative list reduces false positives.
+
+### UPDATED — All 11 vuln test functions
+
+Applied uniformly at the end of each test function:
+
+```python
+waf_detected = not vulnerable and _detect_waf(collected_responses)
+```
+
+The `not vulnerable` guard ensures that if a payload succeeded past the WAF, the signal is not set — the agent should report the finding, not retry with bypass payloads.
+
+Affected functions: `test_idor`, `test_ssrf`, `test_xss`, `test_sqli`, `test_auth`, `test_race`, `test_redirect`, `test_csrf`, `test_mass_assign`, `test_reset`, `test_ai`.
 
 ---
 

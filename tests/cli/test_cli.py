@@ -393,6 +393,66 @@ class TestContextDirectories:
         assert any(r["status_code"] == 403 for r in data)
 
 
+class TestContextParameters:
+    def test_parameters_empty(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(app, ["context", "parameters", hunt_id, "--data-dir", str(tmp_path)])
+        assert result.exit_code == 0
+
+    def test_parameters_with_data(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "parameter",
+            [
+                {
+                    "url": "https://api.example.com/search",
+                    "method": "GET",
+                    "name": "debug",
+                    "param_type": "query",
+                    "confirmed": True,
+                    "source": "arjun",
+                }
+            ],
+            source="arjun",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(app, ["context", "parameters", hunt_id, "--data-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "debug" in result.output
+
+    def test_parameters_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "parameter",
+            [
+                {
+                    "url": "https://api.example.com/profile",
+                    "method": "POST",
+                    "name": "role",
+                    "param_type": "body",
+                    "confirmed": False,
+                    "source": "arjun",
+                }
+            ],
+            source="arjun",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            ["context", "parameters", hunt_id, "--format", "json", "--data-dir", str(tmp_path)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert any(r["name"] == "role" for r in data)
+
+
 class TestContextRuns:
     def test_runs_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
@@ -746,6 +806,71 @@ class TestEnumDirectoriesCLI:
                     hunt_id,
                     "--url",
                     "https://example.com/FUZZ",
+                    "--format",
+                    "json",
+                    "--data-dir",
+                    str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["found"] == 1
+
+
+class TestEnumParametersCLI:
+    def test_enum_parameters(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": True,
+            }
+        ]
+        mock_fn = AsyncMock(return_value=_make_result("arjun", records))
+        with patch("boba.tools.enum.parameters", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "enum",
+                    "parameters",
+                    hunt_id,
+                    "--url",
+                    "https://example.com/search",
+                    "--data-dir",
+                    str(tmp_path),
+                ],
+            )
+        assert result.exit_code == 0
+        assert "debug" in result.output
+
+    def test_enum_parameters_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [
+            {
+                "url": "https://example.com/profile",
+                "method": "POST",
+                "name": "role",
+                "param_type": "body",
+                "confirmed": True,
+            }
+        ]
+        mock_fn = AsyncMock(return_value=_make_result("arjun", records))
+        with patch("boba.tools.enum.parameters", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "enum",
+                    "parameters",
+                    hunt_id,
+                    "--url",
+                    "https://example.com/profile",
+                    "--method",
+                    "POST",
+                    "--body-type",
+                    "json",
                     "--format",
                     "json",
                     "--data-dir",

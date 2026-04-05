@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 
+from boba.adapters.arjun import ArjunAdapter
 from boba.adapters.ffuf import FfufAdapter
 from boba.adapters.katana import KatanaAdapter
 from boba.core.context import HuntContext
@@ -12,6 +13,28 @@ from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
 
 logger = logging.getLogger(__name__)
+
+
+async def parameters(
+    context: HuntContext,
+    hunt: Hunt,
+    url: str,
+    method: str = "GET",
+    body_type: str | None = None,
+    config: AdapterConfig | None = None,
+) -> ToolResult:
+    """Discover hidden parameters on a known endpoint using Arjun."""
+    config = copy.deepcopy(config) if config else AdapterConfig()
+    config.extra_args_dict["method"] = method.upper()
+    if body_type:
+        config.extra_args_dict["body_type"] = body_type.lower()
+
+    scope = ScopeEngine(hunt.scope)
+    adapter = ArjunAdapter(scope_engine=scope)
+    result = await adapter.run(targets=[url], config=config)
+    context.upsert_records(hunt.id, "parameter", result.records, source="arjun")
+    context.log_tool_run(hunt.id, result)
+    return result
 
 
 async def directories(

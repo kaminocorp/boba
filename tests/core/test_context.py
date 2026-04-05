@@ -117,6 +117,82 @@ class TestURLUpsert:
         assert "gau" in sources and "waybackurls" in sources
 
 
+class TestParameterUpsert:
+    def test_insert_and_query(self, context, sample_hunt):
+        context.upsert_parameter(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": True,
+            },
+            source="arjun",
+        )
+        params = context.get_parameters(sample_hunt.id)
+        assert len(params) == 1
+        assert params[0]["name"] == "debug"
+        assert params[0]["confirmed"] == 1
+
+    def test_source_merging_and_confirmed_promotion(self, context, sample_hunt):
+        context.upsert_parameter(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": False,
+            },
+            source="arjun",
+        )
+        context.upsert_parameter(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": True,
+            },
+            source="manual",
+        )
+        params = context.get_parameters(sample_hunt.id)
+        assert len(params) == 1
+        assert params[0]["confirmed"] == 1
+        sources = json.loads(params[0]["sources"])
+        assert "arjun" in sources
+        assert "manual" in sources
+
+    def test_filters(self, context, sample_hunt):
+        context.upsert_parameter(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "q",
+                "param_type": "query",
+            },
+            source="arjun",
+        )
+        context.upsert_parameter(
+            sample_hunt.id,
+            {
+                "url": "https://example.com/profile",
+                "method": "POST",
+                "name": "role",
+                "param_type": "body",
+            },
+            source="arjun",
+        )
+        params = context.get_parameters(
+            sample_hunt.id, url="https://example.com/profile", method="POST"
+        )
+        assert len(params) == 1
+        assert params[0]["name"] == "role"
+
+
 class TestToolRunLogging:
     def test_log_and_query(self, context, sample_hunt):
         result = ToolResult(

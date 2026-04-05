@@ -142,6 +142,29 @@ class TestUpsertCommitSafety:
         assert len(dirs) == 1
         assert dirs[0]["url"] == "https://example.com/admin"
 
+    def test_upsert_parameter_persists_across_connections(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        ctx1 = HuntContext(db_path)
+        ctx1.create_hunt(self._make_hunt())
+        ctx1.upsert_parameter(
+            "h1",
+            {
+                "url": "https://example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": True,
+            },
+            source="arjun",
+        )
+        ctx1.close()
+
+        ctx2 = HuntContext(db_path)
+        params = ctx2.get_parameters("h1")
+        ctx2.close()
+        assert len(params) == 1
+        assert params[0]["name"] == "debug"
+
 
 # ---------------------------------------------------------------------------
 # 2. _parse_targets helper

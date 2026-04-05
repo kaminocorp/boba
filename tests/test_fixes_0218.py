@@ -46,7 +46,9 @@ class TestVulnPersistenceLogging:
             with caplog.at_level(logging.ERROR, logger="boba.tools.vuln"):
                 fid = _persist_finding(context, sample_hunt.id, result, "https://example.com")
         assert fid is None
-        assert any("NOT persisted" in r.message and r.levelno == logging.ERROR for r in caplog.records)
+        assert any(
+            "NOT persisted" in r.message and r.levelno == logging.ERROR for r in caplog.records
+        )
 
     def test_record_coverage_logs_warning_on_failure(self, context, sample_hunt, caplog):
         from boba.tools.vuln import _record_coverage
@@ -110,6 +112,10 @@ class TestContextQueryValidation:
         with pytest.raises(HuntNotFoundError):
             context.get_directories("nonexistent")
 
+    def test_get_parameters_invalid_hunt(self, context):
+        with pytest.raises(HuntNotFoundError):
+            context.get_parameters("nonexistent")
+
     def test_get_tool_runs_invalid_hunt(self, context):
         with pytest.raises(HuntNotFoundError):
             context.get_tool_runs("nonexistent")
@@ -122,6 +128,7 @@ class TestContextQueryValidation:
         assert context.get_urls(sample_hunt.id) == []
         assert context.get_technologies(sample_hunt.id) == []
         assert context.get_directories(sample_hunt.id) == []
+        assert context.get_parameters(sample_hunt.id) == []
         assert context.get_tool_runs(sample_hunt.id) == []
 
 

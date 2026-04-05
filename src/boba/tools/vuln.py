@@ -13,6 +13,7 @@ from urllib.parse import quote, unquote, urlencode, urlparse, parse_qs, urlunpar
 from boba.core.context import HuntContext
 from boba.core.models import (
     Confidence,
+    HttpResponse,
     Severity,
     SessionState,
     VulnTestResult,
@@ -34,6 +35,20 @@ _ADMIN_RE = re.compile(r"/(admin|manage|internal|superuser)([/?#]|$)", re.IGNORE
 
 # Regex matching JSON structural-only lines (braces, brackets, commas)
 _JSON_STRUCTURAL_RE = re.compile(rb"^\s*[\[\]{},]*\s*$")
+
+_WAF_STATUS_CODES = frozenset({403, 406, 429, 503})
+_WAF_BODY_SIGNATURES = (
+    "blocked",
+    "waf",
+    "firewall",
+    "cloudflare",
+    "akamai",
+    "incapsula",
+    "sucuri",
+    "mod_security",
+    "request blocked",
+    "security policy",
+)
 
 
 def _inject_param(url: str, param_name: str, value: str) -> str:
@@ -108,9 +123,7 @@ def _persist_finding(
             },
         )
     except Exception as exc:
-        logger.error(
-            "Finding detected but NOT persisted for %s %s: %s", result.test_type, url, exc
-        )
+        logger.error("Finding detected but NOT persisted for %s %s: %s", result.test_type, url, exc)
         return None
 
 
@@ -144,6 +157,7 @@ async def test_idor(
 
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
 
     # Request as User A (owner)
     resp_a = await http_client.request(
@@ -170,6 +184,7 @@ async def test_idor(
         tags=["idor", "user_b"],
     )
     request_ids.append(resp_b.request_id)
+    collected_responses.append(resp_b)
 
     # Request with no auth
     resp_unauth = await http_client.request(
@@ -259,6 +274,7 @@ async def test_idor(
                 tags=["idor", "enum"],
             )
             request_ids.append(resp.request_id)
+            collected_responses.append(resp)
             if 200 <= resp.status_code < 400:
                 # Verify this returns real data, not just a generic success page,
                 # by comparing with User A's response.
@@ -278,6 +294,7 @@ async def test_idor(
                         f"and receives data similar to the owner's response."
                     )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="idor",
         vulnerable=vulnerable,
@@ -290,6 +307,7 @@ async def test_idor(
         recommendations=["Implement proper authorization checks per-resource"]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, endpoint, method)
     _record_coverage(context, hunt_id, endpoint, method, "", "idor")
@@ -318,13 +336,15 @@ async def test_ssrf(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="ssrf", vulnerable=False,
+            test_type="ssrf",
+            vulnerable=False,
             title=f"SSRF on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     payloads = payloads or ssrf_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = session.headers if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -354,6 +374,7 @@ async def test_ssrf(
                 tags=["ssrf", param_name],
             )
             request_ids.append(resp.request_id)
+            collected_responses.append(resp)
 
             # Check for strong SSRF indicators in response (content that could
             # only appear if the server fetched an internal resource).
@@ -442,6 +463,7 @@ async def test_ssrf(
                 tags=["ssrf", "blind"],
             )
             request_ids.append(resp.request_id)
+            collected_responses.append(resp)
 
         # Poll for callbacks
         interactions = await oob_manager.poll(timeout_seconds=poll_timeout_seconds)
@@ -460,6 +482,7 @@ async def test_ssrf(
                     }
                 )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="ssrf",
         vulnerable=vulnerable,
@@ -472,6 +495,7 @@ async def test_ssrf(
         recommendations=["Validate and whitelist URLs server-side", "Block internal IPs"]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     param_name = injection_points[0].get("name", "url") if injection_points else "url"
     _persist_finding(context, hunt_id, result, url, method, param_name)
@@ -504,13 +528,15 @@ async def test_xss(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="xss", vulnerable=False,
+            test_type="xss",
+            vulnerable=False,
             title=f"XSS on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     payloads = payloads or xss_payloads.BASIC
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = session.headers if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -536,6 +562,7 @@ async def test_xss(
                 tags=["xss", param_name],
             )
             request_ids.append(resp.request_id)
+            collected_responses.append(resp)
 
             # Check reflection — payload appears unescaped in response.
             # Also check the URL-decoded form for encoding bypass payloads
@@ -635,6 +662,7 @@ async def test_xss(
             if dom_found:
                 break
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="xss",
         vulnerable=vulnerable,
@@ -647,6 +675,7 @@ async def test_xss(
         recommendations=["Encode output contextually", "Implement Content-Security-Policy"]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     test_params = params or {"q": ""}
     param_str = ",".join(test_params.keys())
@@ -679,13 +708,15 @@ async def test_sqli(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="sqli", vulnerable=False,
+            test_type="sqli",
+            vulnerable=False,
             title=f"SQL Injection on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     payloads = payloads or sqli_payloads.ERROR_BASED
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = session.headers if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -723,6 +754,7 @@ async def test_sqli(
                 tags=["sqli", "error_based"],
             )
             request_ids.append(resp.request_id)
+            collected_responses.append(resp)
 
             # Check for SQL error signatures in response
             body_lower = resp.body_text.lower()
@@ -769,6 +801,7 @@ async def test_sqli(
                 tags=["sqli", "boolean_false"],
             )
             request_ids.extend([resp_true.request_id, resp_false.request_id])
+            collected_responses.extend([resp_true, resp_false])
 
             # If true/false conditions produce different response lengths, likely SQLi.
             # Guards: (1) true-condition must match baseline, (2) false must NOT.
@@ -842,6 +875,7 @@ async def test_sqli(
                     timeout_seconds=15.0,
                 )
                 request_ids.append(resp_time.request_id)
+                collected_responses.append(resp_time)
                 # A SLEEP(5) payload should add ≥3s over the median baseline
                 delay_ms = resp_time.elapsed_ms - baseline_median
                 if delay_ms >= 3000:
@@ -856,6 +890,7 @@ async def test_sqli(
                         timeout_seconds=15.0,
                     )
                     request_ids.append(resp_confirm.request_id)
+                    collected_responses.append(resp_confirm)
                     confirm_delay = resp_confirm.elapsed_ms - baseline_median
                     if confirm_delay < 3000:
                         continue  # First hit was a network fluke
@@ -876,6 +911,7 @@ async def test_sqli(
                     )
                     break
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="sqli",
         vulnerable=vulnerable,
@@ -890,6 +926,7 @@ async def test_sqli(
         recommendations=["Use parameterized queries", "Implement input validation"]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     test_params = params or {"id": "1"}
     param_str = ",".join(test_params.keys())
@@ -916,12 +953,14 @@ async def test_auth(
     """
     if scope_engine and not scope_engine.is_in_scope(endpoint):
         return VulnTestResult(
-            test_type="auth", vulnerable=False,
+            test_type="auth",
+            vulnerable=False,
             title=f"Auth bypass on {endpoint}",
             description=f"Skipped: {endpoint} is out of scope",
         )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     vulnerable = False
     confidence = Confidence.POSSIBLE
 
@@ -970,6 +1009,7 @@ async def test_auth(
                 tags=["auth", "jwt_none"],
             )
             request_ids.append(resp_none.request_id)
+            collected_responses.append(resp_none)
 
             if 200 <= resp_none.status_code < 400:
                 vulnerable = True
@@ -993,6 +1033,7 @@ async def test_auth(
                     tags=["auth", "jwt_escalation"],
                 )
                 request_ids.append(resp_esc.request_id)
+                collected_responses.append(resp_esc)
 
                 if 200 <= resp_esc.status_code < 400:
                     vulnerable = True
@@ -1054,6 +1095,7 @@ async def test_auth(
                     }
                 )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="auth",
         vulnerable=vulnerable,
@@ -1070,6 +1112,7 @@ async def test_auth(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     # Determine the most descriptive "parameter" for finding persistence
     auth_param = "jwt" if jwt_token else ""
@@ -1096,7 +1139,8 @@ async def test_race(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="race", vulnerable=False,
+            test_type="race",
+            vulnerable=False,
             title=f"Race condition on {url}",
             description=f"Skipped: {url} is out of scope",
         )
@@ -1118,9 +1162,7 @@ async def test_race(
             tags=["race"],
         )
 
-    results = await asyncio.gather(
-        *[_send() for _ in range(concurrency)], return_exceptions=True
-    )
+    results = await asyncio.gather(*[_send() for _ in range(concurrency)], return_exceptions=True)
     responses = [r for r in results if not isinstance(r, BaseException)]
     errors = [r for r in results if isinstance(r, BaseException)]
     if errors:
@@ -1201,6 +1243,7 @@ async def test_race(
             }
         )
 
+    waf_detected = not vulnerable and _detect_waf(responses)
     result = VulnTestResult(
         test_type="race",
         vulnerable=vulnerable,
@@ -1218,6 +1261,7 @@ async def test_race(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "race")
@@ -1241,13 +1285,15 @@ async def test_redirect(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="redirect", vulnerable=False,
+            test_type="redirect",
+            vulnerable=False,
             title=f"Open redirect on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     payloads = payloads or redirect_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = session.headers if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -1268,6 +1314,7 @@ async def test_redirect(
             tags=["redirect", param],
         )
         request_ids.append(resp.request_id)
+        collected_responses.append(resp)
 
         # Check Location header for external redirect
         location = ""
@@ -1298,6 +1345,7 @@ async def test_redirect(
                 )
                 break
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="redirect",
         vulnerable=vulnerable,
@@ -1313,6 +1361,7 @@ async def test_redirect(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, "GET", param)
     _record_coverage(context, hunt_id, url, "GET", param, "redirect")
@@ -1335,12 +1384,14 @@ async def test_csrf(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="csrf", vulnerable=False,
+            test_type="csrf",
+            vulnerable=False,
             title=f"CSRF on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = dict(session.headers) if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -1380,6 +1431,7 @@ async def test_csrf(
         tags=["csrf", "no_token"],
     )
     request_ids.append(resp_no_token.request_id)
+    collected_responses.append(resp_no_token)
 
     if 200 <= resp_no_token.status_code < 400:
         vulnerable = True
@@ -1406,6 +1458,7 @@ async def test_csrf(
         tags=["csrf", "invalid_token"],
     )
     request_ids.append(resp_invalid.request_id)
+    collected_responses.append(resp_invalid)
 
     if 200 <= resp_invalid.status_code < 400:
         if vulnerable:
@@ -1435,6 +1488,7 @@ async def test_csrf(
         tags=["csrf", "cross_origin"],
     )
     request_ids.append(resp_cross.request_id)
+    collected_responses.append(resp_cross)
 
     if 200 <= resp_cross.status_code < 400:
         evidence.append(
@@ -1446,6 +1500,7 @@ async def test_csrf(
             }
         )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="csrf",
         vulnerable=vulnerable,
@@ -1463,6 +1518,7 @@ async def test_csrf(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "csrf")
@@ -1486,12 +1542,14 @@ async def test_mass_assign(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="mass_assign", vulnerable=False,
+            test_type="mass_assign",
+            vulnerable=False,
             title=f"Mass assignment on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = dict(session.headers) if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -1519,6 +1577,7 @@ async def test_mass_assign(
         tags=["mass_assign", "baseline"],
     )
     request_ids.append(resp_before.request_id)
+    collected_responses.append(resp_before)
 
     # Step 2: Send with extra fields
     payload = {**base, **extras}
@@ -1532,6 +1591,7 @@ async def test_mass_assign(
         tags=["mass_assign", "inject"],
     )
     request_ids.append(resp_update.request_id)
+    collected_responses.append(resp_update)
 
     # Step 3: GET again to check persistence
     resp_after = await http_client.request(
@@ -1543,6 +1603,7 @@ async def test_mass_assign(
         tags=["mass_assign", "verify"],
     )
     request_ids.append(resp_after.request_id)
+    collected_responses.append(resp_after)
 
     # Compare: check if any extra fields appeared in the after response
     try:
@@ -1583,6 +1644,7 @@ async def test_mass_assign(
             }
         )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="mass_assign",
         vulnerable=vulnerable,
@@ -1598,6 +1660,7 @@ async def test_mass_assign(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, method)
     _record_coverage(context, hunt_id, url, method, "", "mass_assign")
@@ -1620,12 +1683,14 @@ async def test_reset(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="reset", vulnerable=False,
+            test_type="reset",
+            vulnerable=False,
             title=f"Password reset flaw on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = dict(session.headers) if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -1651,6 +1716,7 @@ async def test_reset(
         tags=["reset", "host_injection"],
     )
     request_ids.append(resp_host.request_id)
+    collected_responses.append(resp_host)
 
     # Check if attack host appears in response (e.g., in a reset link)
     if attack_host in resp_host.body_text:
@@ -1678,6 +1744,7 @@ async def test_reset(
             tags=["reset", "rate_limit"],
         )
         request_ids.append(resp_rate.request_id)
+        collected_responses.append(resp_rate)
         if 200 <= resp_rate.status_code < 400:
             rate_successes += 1
 
@@ -1690,6 +1757,7 @@ async def test_reset(
             }
         )
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="reset",
         vulnerable=vulnerable,
@@ -1705,6 +1773,7 @@ async def test_reset(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, "POST", email_param)
     _record_coverage(context, hunt_id, url, "POST", email_param, "reset")
@@ -1730,13 +1799,15 @@ async def test_ai(
     """
     if scope_engine and not scope_engine.is_in_scope(url):
         return VulnTestResult(
-            test_type="ai", vulnerable=False,
+            test_type="ai",
+            vulnerable=False,
             title=f"Prompt injection on {url}",
             description=f"Skipped: {url} is out of scope",
         )
     payloads = payloads or ai_payloads.ALL
     request_ids: list[int] = []
     evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
     headers = session.headers if session else {}
     cookies = session.cookies if session else {}
     vulnerable = False
@@ -1758,6 +1829,7 @@ async def test_ai(
             tags=["ai", param],
         )
         request_ids.append(resp.request_id)
+        collected_responses.append(resp)
         body_lower = resp.body_text.lower()
 
         # Check for canary markers (instruction override success)
@@ -1795,6 +1867,7 @@ async def test_ai(
         if vulnerable:
             break
 
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
     result = VulnTestResult(
         test_type="ai",
         vulnerable=vulnerable,
@@ -1811,6 +1884,7 @@ async def test_ai(
         ]
         if vulnerable
         else [],
+        waf_detected=waf_detected,
     )
     _persist_finding(context, hunt_id, result, url, "GET", param)
     _record_coverage(context, hunt_id, url, "GET", param, "ai")
@@ -1830,6 +1904,27 @@ def _extract_json_keys(data: Any, prefix: str = "") -> set[str]:
         if data:
             keys.update(_extract_json_keys(data[0], f"{prefix}[]"))
     return keys
+
+
+def _detect_waf(responses: list[HttpResponse]) -> bool:
+    """Return True if responses suggest WAF blocking rather than clean results."""
+    if len(responses) < 3:
+        return False
+
+    has_waf_signature = [
+        any(sig in r.body_text.lower() for sig in _WAF_BODY_SIGNATURES) for r in responses
+    ]
+
+    if all(r.status_code in _WAF_STATUS_CODES for r in responses):
+        bodies = [r.body_text.lower().strip() for r in responses]
+        unique_bodies = set(bodies)
+        if len(unique_bodies) <= 2 and any(has_waf_signature):
+            return True
+
+    if all(has_waf_signature):
+        return True
+
+    return False
 
 
 def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> bool:

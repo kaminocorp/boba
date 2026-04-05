@@ -1,1 +1,1 @@
-Get started by looking at docs/vision.md, docs/product-vision.md, docs/changelog.md and CLAUDE.md
+Get started by looking at docs/vision.md, docs/changelog.md and CLAUDE.md

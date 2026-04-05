@@ -67,6 +67,39 @@ def _make_response(status_code, body_text, request_id=1):
     )
 
 
+class TestWAFDetection:
+    def test_detects_identical_blocking_responses(self):
+        responses = [
+            _make_response(403, "Request blocked", 1),
+            _make_response(403, "Request blocked", 2),
+            _make_response(403, "Request blocked", 3),
+        ]
+        assert vuln._detect_waf(responses) is True
+
+    def test_detects_signature_responses(self):
+        responses = [
+            _make_response(200, "Blocked by Cloudflare WAF", 1),
+            _make_response(200, "Blocked by Cloudflare WAF", 2),
+            _make_response(200, "Blocked by Cloudflare WAF", 3),
+        ]
+        assert vuln._detect_waf(responses) is True
+
+    def test_does_not_detect_mixed_statuses(self):
+        responses = [
+            _make_response(200, "ok", 1),
+            _make_response(404, "missing", 2),
+            _make_response(500, "error", 3),
+        ]
+        assert vuln._detect_waf(responses) is False
+
+    def test_does_not_detect_with_fewer_than_three_responses(self):
+        responses = [
+            _make_response(403, "Request blocked", 1),
+            _make_response(403, "Request blocked", 2),
+        ]
+        assert vuln._detect_waf(responses) is False
+
+
 class TestIDOR:
     @pytest.mark.asyncio
     async def test_idor_confirmed(self, sink, session_a, session_b):
@@ -95,6 +128,7 @@ class TestIDOR:
         assert result.confidence == Confidence.CONFIRMED
         assert result.severity == Severity.HIGH
         assert len(result.request_ids) == 3
+        assert result.waf_detected is False
 
     @pytest.mark.asyncio
     async def test_idor_not_vulnerable(self, sink, session_a, session_b):
@@ -189,6 +223,31 @@ class TestSSRF:
             payloads=["http://127.0.0.1"],
         )
         assert result.vulnerable is False
+        assert result.waf_detected is False
+
+    @pytest.mark.asyncio
+    async def test_ssrf_waf_detected(self, sink):
+        """Blocking template pages across payloads should surface WAF detection."""
+        client = HttpClient(sink)
+        call_count = 0
+
+        async def mock_request(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _make_response(403, "Request blocked by WAF", call_count)
+
+        client.request = mock_request
+        result = await vuln.test_ssrf(
+            client,
+            url="https://app.example.com/proxy",
+            payloads=[
+                "http://127.0.0.1",
+                "http://169.254.169.254/latest/meta-data/",
+                "http://localhost/admin",
+            ],
+        )
+        assert result.vulnerable is False
+        assert result.waf_detected is True
 
 
 class TestXSS:
@@ -220,6 +279,7 @@ class TestXSS:
         assert result.vulnerable is True
         assert result.confidence == Confidence.CONFIRMED
         assert result.evidence[0]["type"] == "reflected"
+        assert result.waf_detected is False
 
     @pytest.mark.asyncio
     async def test_xss_partial_reflection(self, sink):
@@ -264,6 +324,7 @@ class TestXSS:
             payloads=["<script>alert(1)</script>"],
         )
         assert result.vulnerable is False
+        assert result.waf_detected is False
 
 
 class TestSQLi:
@@ -299,6 +360,7 @@ class TestSQLi:
         assert result.vulnerable is True
         assert result.confidence == Confidence.CONFIRMED
         assert result.evidence[0]["type"] == "error_based"
+        assert result.waf_detected is False
 
     @pytest.mark.asyncio
     async def test_sqli_not_vulnerable(self, sink):
@@ -319,6 +381,7 @@ class TestSQLi:
             payloads=["'"],
         )
         assert result.vulnerable is False
+        assert result.waf_detected is False
 
 
 class TestBodiesSimilar:
@@ -462,6 +525,7 @@ class TestAuth:
         assert result.vulnerable is True
         # Without a session to compare against, admin-like endpoint gives POSSIBLE
         assert result.confidence == Confidence.POSSIBLE
+        assert result.waf_detected is False
 
     @pytest.mark.asyncio
     async def test_auth_properly_enforced(self, sink):
@@ -482,3 +546,4 @@ class TestAuth:
             endpoint="https://app.example.com/api/data",
         )
         assert result.vulnerable is False
+        assert result.waf_detected is False

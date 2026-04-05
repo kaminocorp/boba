@@ -86,6 +86,77 @@ class TestDirectories:
         assert any(r["tool_name"] == "ffuf" for r in runs)
 
 
+class TestParameters:
+    async def test_parameters_persists_results(self, manager, sample_hunt):
+        records = [
+            {
+                "url": "https://api.example.com/search",
+                "method": "GET",
+                "name": "debug",
+                "param_type": "query",
+                "confirmed": True,
+            },
+            {
+                "url": "https://api.example.com/search",
+                "method": "GET",
+                "name": "page",
+                "param_type": "query",
+                "confirmed": False,
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("arjun", records))
+
+        with patch("boba.tools.enum.ArjunAdapter.run", mock_run):
+            result = await enum.parameters(
+                manager.context,
+                sample_hunt,
+                "https://api.example.com/search",
+            )
+
+        assert len(result.records) == 2
+        saved = manager.context.get_parameters(sample_hunt.id)
+        assert len(saved) == 2
+        assert {p["name"] for p in saved} == {"debug", "page"}
+        assert sum(p["confirmed"] for p in saved) == 1
+
+    async def test_parameters_empty_results(self, manager, sample_hunt):
+        mock_run = AsyncMock(return_value=_make_result("arjun", []))
+
+        with patch("boba.tools.enum.ArjunAdapter.run", mock_run):
+            result = await enum.parameters(
+                manager.context,
+                sample_hunt,
+                "https://api.example.com/search",
+            )
+
+        assert result.records == []
+        assert manager.context.get_parameters(sample_hunt.id) == []
+
+    async def test_parameters_tool_run_logged(self, manager, sample_hunt):
+        records = [
+            {
+                "url": "https://api.example.com/profile",
+                "method": "POST",
+                "name": "role",
+                "param_type": "body",
+                "confirmed": True,
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("arjun", records))
+
+        with patch("boba.tools.enum.ArjunAdapter.run", mock_run):
+            await enum.parameters(
+                manager.context,
+                sample_hunt,
+                "https://api.example.com/profile",
+                method="POST",
+                body_type="json",
+            )
+
+        runs = manager.context.get_tool_runs(sample_hunt.id)
+        assert any(r["tool_name"] == "arjun" for r in runs)
+
+
 class TestCrawl:
     async def test_crawl_persists_results(self, manager, sample_hunt):
         records = [

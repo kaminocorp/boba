@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
     """Lazy import to avoid circular dependencies."""
+    from boba.adapters.arjun import ArjunAdapter
     from boba.adapters.ffuf import FfufAdapter
     from boba.adapters.gau import GauAdapter
     from boba.adapters.httpx_runner import HttpxRunnerAdapter
@@ -21,6 +22,7 @@ def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
     from boba.adapters.whatweb import WhatwebAdapter
 
     return {
+        "arjun": ArjunAdapter,
         "subfinder": SubfinderAdapter,
         "httpx": HttpxRunnerAdapter,
         "naabu": NaabuAdapter,

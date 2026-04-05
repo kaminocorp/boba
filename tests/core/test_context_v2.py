@@ -431,9 +431,11 @@ class TestOOBListeners:
 class TestV2Stats:
     def test_stats_include_new_tables(self, context, hunt_id):
         stats = context.get_hunt_stats(hunt_id)
+        assert "parameters" in stats
         assert "http_history" in stats
         assert "sessions" in stats
         assert "findings" in stats
+        assert stats["parameters"] == 0
         assert stats["http_history"] == 0
         assert stats["sessions"] == 0
         assert stats["findings"] == 0

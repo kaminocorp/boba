@@ -38,7 +38,9 @@ class TestDetectChains:
     def test_ssrf_cloud_metadata_chain(self, context, hunt_id):
         """SSRF with cloud metadata evidence → chain detected."""
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
+            context,
+            hunt_id,
+            finding_type="ssrf",
             url="https://app.example.com/proxy",
             parameter="url",
             evidence=[{"payload": "http://169.254.169.254/latest/meta-data/", "indicator": "aws"}],
@@ -53,7 +55,9 @@ class TestDetectChains:
     def test_auth_bypass_admin_chain(self, context, hunt_id):
         """Auth bypass with admin evidence → chain detected."""
         _insert_finding(
-            context, hunt_id, finding_type="auth",
+            context,
+            hunt_id,
+            finding_type="auth",
             url="https://app.example.com/admin/users",
             evidence=[{"type": "no_auth_access", "note": "admin panel accessible"}],
         )
@@ -65,26 +69,34 @@ class TestDetectChains:
     def test_idor_plus_sqli_same_host(self, context, hunt_id):
         """IDOR + SQLi on same host → chain detected."""
         _insert_finding(
-            context, hunt_id, finding_type="idor",
+            context,
+            hunt_id,
+            finding_type="idor",
             url="https://app.example.com/api/users",
             parameter="id",
         )
         _insert_finding(
-            context, hunt_id, finding_type="sqli",
+            context,
+            hunt_id,
+            finding_type="sqli",
             url="https://app.example.com/api/search",
             parameter="q",
             evidence=[{"type": "error_based"}],
         )
 
         chains = detect_chains(context, hunt_id)
-        idor_sqli = [c for c in chains if "idor" in c.description.lower() and "sqli" in c.description.lower()]
+        idor_sqli = [
+            c for c in chains if "idor" in c.description.lower() and "sqli" in c.description.lower()
+        ]
         assert len(idor_sqli) == 1
         assert idor_sqli[0].severity == Severity.CRITICAL
 
     def test_no_chain_without_evidence(self, context, hunt_id):
         """SSRF without cloud metadata keywords → no cloud metadata chain."""
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
+            context,
+            hunt_id,
+            finding_type="ssrf",
             url="https://app.example.com/proxy",
             parameter="url",
             evidence=[{"payload": "http://internal.corp/", "note": "generic ssrf"}],
@@ -97,38 +109,55 @@ class TestDetectChains:
     def test_same_host_rule_different_hosts(self, context, hunt_id):
         """same_host=True rule doesn't match findings on different hosts."""
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app1.example.com/api/users", parameter="id",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app1.example.com/api/users",
+            parameter="id",
         )
         _insert_finding(
-            context, hunt_id, finding_type="sqli",
-            url="https://app2.example.com/api/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="sqli",
+            url="https://app2.example.com/api/search",
+            parameter="q",
             evidence=[{"type": "error_based"}],
         )
 
         chains = detect_chains(context, hunt_id)
-        idor_sqli = [c for c in chains if "idor" in c.description.lower() and "sqli" in c.description.lower()]
+        idor_sqli = [
+            c for c in chains if "idor" in c.description.lower() and "sqli" in c.description.lower()
+        ]
         assert len(idor_sqli) == 0
 
     def test_dedup_excluded_from_chains(self, context, hunt_id):
         """Non-canonical dedup members don't participate in chain detection."""
         f1 = _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/proxy", parameter="url",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/proxy",
+            parameter="url",
             evidence=[{"payload": "http://169.254.169.254/", "indicator": "aws"}],
         )
         f2 = _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/fetch", parameter="url",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/fetch",
+            parameter="url",
             evidence=[{"payload": "http://169.254.169.254/", "indicator": "aws"}],
         )
 
         # Mark f2 as duplicate of f1
-        context.insert_dedup_group(hunt_id, {
-            "canonical_id": f1,
-            "finding_ids": [f1, f2],
-            "reason": "Same vuln",
-        })
+        context.insert_dedup_group(
+            hunt_id,
+            {
+                "canonical_id": f1,
+                "finding_ids": [f1, f2],
+                "reason": "Same vuln",
+            },
+        )
 
         chains = detect_chains(context, hunt_id)
         # Chain should only reference the canonical finding
@@ -139,7 +168,9 @@ class TestDetectChains:
     def test_chain_severity_at_least_max_individual(self, context, hunt_id):
         """Chain severity should be at least as high as the highest individual finding."""
         _insert_finding(
-            context, hunt_id, finding_type="auth",
+            context,
+            hunt_id,
+            finding_type="auth",
             url="https://app.example.com/admin",
             severity="high",
             evidence=[{"type": "no_auth_access", "note": "admin accessible"}],
@@ -152,8 +183,11 @@ class TestDetectChains:
     def test_chain_idempotent(self, context, hunt_id):
         """Running detect_chains twice doesn't create duplicate chains."""
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/proxy", parameter="url",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/proxy",
+            parameter="url",
             evidence=[{"payload": "http://169.254.169.254/", "indicator": "aws"}],
         )
 
@@ -170,6 +204,124 @@ class TestDetectChains:
         chains = detect_chains(context, hunt_id)
         assert chains == []
 
+    def test_ai_tool_abuse_chain(self, context, hunt_id):
+        """AI findings with tool-use evidence should chain to critical impact."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://app.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "function_call", "tool": "search"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "ai_tool_abuse" in c.tags]
+        assert len(ai_chains) == 1
+        assert ai_chains[0].severity == Severity.CRITICAL
+
+    def test_ai_data_exfiltration_chain(self, context, hunt_id):
+        """System prompt leak evidence should chain to high-severity data exposure."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://app.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "system_prompt_leak", "leak": "internal policy"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "ai_data_exfiltration" in c.tags]
+        assert len(ai_chains) == 1
+        assert ai_chains[0].severity == Severity.HIGH
+
+    def test_xss_to_ai_injection_same_host(self, context, hunt_id):
+        """XSS and AI findings on the same host should produce an AI injection chain."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="q",
+            evidence=[{"type": "reflected"}],
+        )
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://app.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "instruction_override"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "xss_to_ai_injection" in c.tags]
+        assert len(ai_chains) == 1
+        assert ai_chains[0].severity == Severity.CRITICAL
+
+    def test_ai_plus_auth_bypass_same_host(self, context, hunt_id):
+        """AI and auth findings on the same host should produce a privileged AI chain."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://app.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "instruction_override"}],
+        )
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="auth",
+            url="https://app.example.com/admin/ai",
+            parameter="",
+            evidence=[{"type": "no_auth_access", "note": "admin AI panel accessible"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "ai_plus_auth_bypass" in c.tags]
+        assert len(ai_chains) == 1
+        assert ai_chains[0].severity == Severity.CRITICAL
+
+    def test_ai_tool_abuse_requires_matching_evidence(self, context, hunt_id):
+        """AI tool-abuse chain should not fire without tool-use evidence."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://app.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "instruction_override"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "ai_tool_abuse" in c.tags]
+        assert len(ai_chains) == 0
+
+    def test_ai_plus_auth_bypass_requires_same_host(self, context, hunt_id):
+        """AI/auth chain should not fire when findings are on different hosts."""
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="ai",
+            url="https://chat.example.com/api/chat",
+            parameter="message",
+            evidence=[{"type": "instruction_override"}],
+        )
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="auth",
+            url="https://admin.example.com/admin/ai",
+            parameter="",
+            evidence=[{"type": "no_auth_access", "note": "admin AI panel accessible"}],
+        )
+
+        chains = detect_chains(context, hunt_id)
+        ai_chains = [c for c in chains if "ai_plus_auth_bypass" in c.tags]
+        assert len(ai_chains) == 0
+
 
 # ═══════════════════ Suggest Chains ═══════════════════
 
@@ -178,8 +330,11 @@ class TestSuggestChains:
     def test_suggest_for_specific_findings(self, context, hunt_id):
         """suggest_chains returns chains relevant to the given finding IDs."""
         f1 = _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/proxy", parameter="url",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/proxy",
+            parameter="url",
             evidence=[{"payload": "http://169.254.169.254/", "indicator": "aws"}],
         )
 
@@ -190,8 +345,11 @@ class TestSuggestChains:
     def test_suggest_no_match(self, context, hunt_id):
         """suggest_chains returns empty when findings don't match any rule."""
         f1 = _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="q",
             evidence=[{"type": "reflected"}],
         )
 
@@ -209,8 +367,11 @@ class TestValidateChain:
     def test_validate_updates_confidence(self, context, hunt_id):
         """validate_chain transitions from hypothetical to validated."""
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/proxy", parameter="url",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/proxy",
+            parameter="url",
             evidence=[{"payload": "http://169.254.169.254/", "indicator": "aws"}],
         )
 
@@ -238,13 +399,16 @@ class TestValidateChain:
 class TestChainContextCRUD:
     def test_upsert_and_query(self, context, hunt_id):
         """Insert a chain and query it back."""
-        cid = context.upsert_chain(hunt_id, {
-            "title": "Test Chain",
-            "severity": "critical",
-            "cvss_score": 9.8,
-            "finding_ids": [1, 2],
-            "impact": "Full compromise",
-        })
+        cid = context.upsert_chain(
+            hunt_id,
+            {
+                "title": "Test Chain",
+                "severity": "critical",
+                "cvss_score": 9.8,
+                "finding_ids": [1, 2],
+                "impact": "Full compromise",
+            },
+        )
         assert cid > 0
 
         chains = context.get_chains(hunt_id)
@@ -254,9 +418,13 @@ class TestChainContextCRUD:
 
     def test_get_chain_by_id(self, context, hunt_id):
         """get_chain returns a single chain."""
-        cid = context.upsert_chain(hunt_id, {
-            "title": "Single Chain", "severity": "high",
-        })
+        cid = context.upsert_chain(
+            hunt_id,
+            {
+                "title": "Single Chain",
+                "severity": "high",
+            },
+        )
 
         chain = context.get_chain(cid)
         assert chain is not None
@@ -296,19 +464,31 @@ class TestCLIChain:
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
 
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "ssrf", "severity": "high",
-            "title": "SSRF", "url": "https://app.example.com/proxy",
-            "parameter": "url",
-            "evidence": [{"payload": "http://169.254.169.254/", "indicator": "aws"}],
-        })
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "ssrf",
+                "severity": "high",
+                "title": "SSRF",
+                "url": "https://app.example.com/proxy",
+                "parameter": "url",
+                "evidence": [{"payload": "http://169.254.169.254/", "indicator": "aws"}],
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "chain", hunt.id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "chain",
+                hunt.id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) >= 1
@@ -326,9 +506,15 @@ class TestCLIChain:
         hunt = mgr.create(name="CLI Test")
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "chain", hunt.id,
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "chain",
+                hunt.id,
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         assert "No chains" in result.stdout

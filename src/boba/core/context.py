@@ -83,7 +83,11 @@ def _json_array_merge(a: str | None, b: str | None) -> str:
     merged: list = []
     for item in arr_a + arr_b:
         try:
-            key = json.dumps(item, sort_keys=True, default=str) if isinstance(item, (dict, list)) else item
+            key = (
+                json.dumps(item, sort_keys=True, default=str)
+                if isinstance(item, (dict, list))
+                else item
+            )
         except (TypeError, ValueError):
             key = str(item)
         if key not in seen:
@@ -202,6 +206,20 @@ CREATE TABLE IF NOT EXISTS directories (
     UNIQUE(hunt_id, url)
 );
 
+CREATE TABLE IF NOT EXISTS parameters (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id       TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    url           TEXT NOT NULL,
+    method        TEXT NOT NULL DEFAULT 'GET',
+    name          TEXT NOT NULL,
+    param_type    TEXT NOT NULL DEFAULT 'query',
+    sources       TEXT NOT NULL DEFAULT '[]',
+    confirmed     INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(hunt_id, url, method, name, param_type)
+);
+
 CREATE TABLE IF NOT EXISTS tool_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
@@ -227,6 +245,8 @@ CREATE INDEX IF NOT EXISTS idx_urls_hunt          ON urls(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_urls_host          ON urls(hunt_id, host);
 CREATE INDEX IF NOT EXISTS idx_technologies_hunt  ON technologies(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_directories_hunt   ON directories(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_parameters_hunt    ON parameters(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_parameters_url     ON parameters(hunt_id, url);
 CREATE INDEX IF NOT EXISTS idx_tool_runs_hunt     ON tool_runs(hunt_id);
 CREATE INDEX IF NOT EXISTS idx_tool_runs_status   ON tool_runs(hunt_id, status);
 
@@ -469,7 +489,8 @@ class HuntContext:
         # Clean up leftover temp table from a prior interrupted migration (shouldn't
         # happen with WAL journaling, but guard against manual DB edits).
         existing_tables = {
-            r[0] for r in self._conn.execute(
+            r[0]
+            for r in self._conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
@@ -838,6 +859,38 @@ class HuntContext:
         )
         self._maybe_commit()
 
+    def upsert_parameter(self, hunt_id: str, record: dict[str, Any], source: str = "") -> None:
+        now = _now()
+        sources_json = json.dumps([source]) if source else "[]"
+        self._conn.execute(
+            """INSERT INTO parameters
+                (hunt_id, url, method, name, param_type, sources, confirmed, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, url, method, name, param_type) DO UPDATE SET
+                sources = (
+                    SELECT json_group_array(DISTINCT value) FROM (
+                        SELECT value FROM json_each(parameters.sources)
+                        UNION ALL
+                        SELECT ?
+                    ) WHERE value != '' AND value IS NOT NULL
+                ),
+                confirmed = MAX(parameters.confirmed, excluded.confirmed),
+                updated_at = excluded.updated_at""",
+            (
+                hunt_id,
+                record["url"],
+                (record.get("method") or "GET").upper(),
+                record["name"],
+                record.get("param_type", "query"),
+                sources_json,
+                1 if record.get("confirmed") else 0,
+                now,
+                now,
+                source,
+            ),
+        )
+        self._maybe_commit()
+
     def upsert_records(
         self, hunt_id: str, table: str, records: list[dict[str, Any]], source: str = ""
     ) -> None:
@@ -853,6 +906,7 @@ class HuntContext:
                 hunt_id, r.get("host", ""), r, source or r.get("source", "")
             ),
             "directory": lambda r: self.upsert_directory(hunt_id, r),
+            "parameter": lambda r: self.upsert_parameter(hunt_id, r, source or r.get("source", "")),
         }
         fn = dispatch.get(table)
         if not fn:
@@ -869,9 +923,7 @@ class HuntContext:
 
     def _ensure_hunt(self, hunt_id: str) -> None:
         """Raise HuntNotFoundError if hunt_id does not exist."""
-        row = self._conn.execute(
-            "SELECT 1 FROM hunts WHERE id = ?", (hunt_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT 1 FROM hunts WHERE id = ?", (hunt_id,)).fetchone()
         if not row:
             raise HuntNotFoundError(f"Hunt '{hunt_id}' not found")
 
@@ -945,6 +997,25 @@ class HuntContext:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_parameters(
+        self,
+        hunt_id: str,
+        url: str | None = None,
+        method: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
+        sql = "SELECT * FROM parameters WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if url:
+            sql += " AND url = ?"
+            params.append(url)
+        if method:
+            sql += " AND method = ?"
+            params.append(method.upper())
+        sql += " ORDER BY url, method, name"
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
     def get_tool_runs(self, hunt_id: str) -> list[dict[str, Any]]:
         self._ensure_hunt(hunt_id)
         rows = self._conn.execute(
@@ -992,6 +1063,7 @@ class HuntContext:
             "urls",
             "technologies",
             "directories",
+            "parameters",
             "http_history",
             "sessions",
             "findings",
@@ -1294,8 +1366,13 @@ class HuntContext:
             cursor,
             "findings",
             "hunt_id = ? AND finding_type = ? AND url = ? AND method = ? AND parameter = ?",
-            (hunt_id, finding["finding_type"], finding.get("url") or "",
-             finding.get("method") or "", finding.get("parameter") or ""),
+            (
+                hunt_id,
+                finding["finding_type"],
+                finding.get("url") or "",
+                finding.get("method") or "",
+                finding.get("parameter") or "",
+            ),
         )
 
     def get_findings(
@@ -1423,10 +1500,17 @@ class HuntContext:
         )
         self._maybe_commit()
         return _resolve_upsert_id(
-            self._conn, cursor, "coverage",
+            self._conn,
+            cursor,
+            "coverage",
             "hunt_id = ? AND url = ? AND method = ? AND parameter = ? AND test_type = ?",
-            (hunt_id, entry["url"], entry.get("method", "GET"),
-             entry.get("parameter", ""), entry["test_type"]),
+            (
+                hunt_id,
+                entry["url"],
+                entry.get("method", "GET"),
+                entry.get("parameter", ""),
+                entry["test_type"],
+            ),
         )
 
     def get_coverage(
@@ -1515,7 +1599,9 @@ class HuntContext:
         )
         self._conn.commit()
         return _resolve_upsert_id(
-            self._conn, cursor, "dedup_groups",
+            self._conn,
+            cursor,
+            "dedup_groups",
             "hunt_id = ? AND canonical_id = ?",
             (hunt_id, group["canonical_id"]),
         )
@@ -1636,7 +1722,9 @@ class HuntContext:
         )
         self._conn.commit()
         return _resolve_upsert_id(
-            self._conn, cursor, "chains",
+            self._conn,
+            cursor,
+            "chains",
             "hunt_id = ? AND title = ?",
             (hunt_id, chain["title"]),
         )

@@ -62,7 +62,14 @@ CHAIN_RULES: list[ChainRule] = [
         min_findings=1,
         combined_severity=Severity.CRITICAL,
         impact="SQL injection may allow OS command execution via stacked queries",
-        evidence_keywords=["stacked_queries", "file_write", "xp_cmdshell", "into_outfile", "load_file", "os_command"],
+        evidence_keywords=[
+            "stacked_queries",
+            "file_write",
+            "xp_cmdshell",
+            "into_outfile",
+            "load_file",
+            "os_command",
+        ],
     ),
     ChainRule(
         name="auth_bypass_admin",
@@ -98,6 +105,40 @@ CHAIN_RULES: list[ChainRule] = [
         same_host=True,
         combined_severity=Severity.CRITICAL,
         impact="IDOR provides valid object references for SQL injection data extraction",
+    ),
+    ChainRule(
+        name="ai_tool_abuse",
+        description="Prompt injection + tool/function calling → unauthorized actions",
+        required_types=["ai"],
+        min_findings=1,
+        combined_severity=Severity.CRITICAL,
+        impact="Prompt injection overrides LLM instructions to call internal tools or APIs with attacker-controlled parameters",
+        evidence_keywords=["function_call", "tool_use", "api_call"],
+    ),
+    ChainRule(
+        name="ai_data_exfiltration",
+        description="Prompt injection + system prompt leak → sensitive data exposure",
+        required_types=["ai"],
+        min_findings=1,
+        combined_severity=Severity.HIGH,
+        impact="System prompt leakage reveals internal configuration, secrets, or sensitive business logic",
+        evidence_keywords=["system_prompt_leak", "credential_leak", "api_key"],
+    ),
+    ChainRule(
+        name="xss_to_ai_injection",
+        description="XSS + LLM chatbot → persistent prompt injection",
+        required_types=["xss", "ai"],
+        same_host=True,
+        combined_severity=Severity.CRITICAL,
+        impact="Cross-site scripting injects malicious content into LLM-facing surfaces, enabling persistent prompt injection",
+    ),
+    ChainRule(
+        name="ai_plus_auth_bypass",
+        description="Prompt injection + auth bypass → privileged LLM operations",
+        required_types=["ai", "auth"],
+        same_host=True,
+        combined_severity=Severity.CRITICAL,
+        impact="Auth bypass exposes privileged AI functionality, and prompt injection turns that access into unauthorized actions",
     ),
 ]
 
@@ -187,19 +228,22 @@ def detect_chains(
         if prev_conf == ChainStatus.VALIDATED.value:
             chain.confidence = ChainStatus.VALIDATED
 
-        chain.id = context.upsert_chain(hunt_id, {
-            "title": chain.title,
-            "description": chain.description,
-            "severity": chain.severity.value,
-            "confidence": chain.confidence.value,
-            "cvss_score": chain.cvss_score,
-            "cvss_vector": chain.cvss_vector,
-            "finding_ids": chain.finding_ids,
-            "chain_order": chain.chain_order,
-            "impact": chain.impact,
-            "prerequisites": chain.prerequisites,
-            "tags": chain.tags,
-        })
+        chain.id = context.upsert_chain(
+            hunt_id,
+            {
+                "title": chain.title,
+                "description": chain.description,
+                "severity": chain.severity.value,
+                "confidence": chain.confidence.value,
+                "cvss_score": chain.cvss_score,
+                "cvss_vector": chain.cvss_vector,
+                "finding_ids": chain.finding_ids,
+                "chain_order": chain.chain_order,
+                "impact": chain.impact,
+                "prerequisites": chain.prerequisites,
+                "tags": chain.tags,
+            },
+        )
 
     return chains
 
@@ -310,20 +354,35 @@ def _chain_cvss(severity: Severity):
 
     if severity == Severity.CRITICAL:
         return calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="N", user_interaction="N",
-            scope="C", confidentiality="H", integrity="H", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="N",
+            user_interaction="N",
+            scope="C",
+            confidentiality="H",
+            integrity="H",
+            availability="N",
         )
     if severity == Severity.HIGH:
         return calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="L", user_interaction="N",
-            scope="U", confidentiality="H", integrity="H", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="L",
+            user_interaction="N",
+            scope="U",
+            confidentiality="H",
+            integrity="H",
+            availability="N",
         )
     return calculate_cvss(
-        attack_vector="N", attack_complexity="L",
-        privileges_required="L", user_interaction="N",
-        scope="U", confidentiality="L", integrity="L", availability="N",
+        attack_vector="N",
+        attack_complexity="L",
+        privileges_required="L",
+        user_interaction="N",
+        scope="U",
+        confidentiality="L",
+        integrity="L",
+        availability="N",
     )
 
 

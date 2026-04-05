@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 from boba.core.context import HuntContext
 
@@ -41,6 +41,7 @@ def prioritize_endpoints(
     # Gather known endpoints
     urls = context.get_urls(hunt_id)
     directories = context.get_directories(hunt_id)
+    parameters = context.get_parameters(hunt_id)
 
     # Build endpoint set with dedup
     endpoints: dict[str, dict[str, Any]] = {}
@@ -54,6 +55,11 @@ def prioritize_endpoints(
 
     if not endpoints:
         return []
+
+    params_by_endpoint: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for param in parameters:
+        key = _endpoint_key(param.get("url", ""), param.get("method", "GET"))
+        params_by_endpoint.setdefault(key, []).append(param)
 
     # Get already-tested URLs for exclusion
     coverage = context.get_coverage(hunt_id)
@@ -88,6 +94,7 @@ def prioritize_endpoints(
         path = parsed.path or ""
         query = parsed.query or ""
         host = parsed.hostname or ""
+        endpoint_params = params_by_endpoint.get(_endpoint_key(url, ep["method"]), [])
 
         # Signal: has query parameters
         params = parse_qs(query, keep_blank_values=True)
@@ -95,6 +102,20 @@ def prioritize_endpoints(
             score += 3.0
             reasons.append(f"Has {len(params)} parameter(s)")
             suggested.extend(["xss", "sqli", "idor"])
+
+        # Signal: hidden parameters discovered by Arjun
+        if endpoint_params:
+            score += 2.0
+            reasons.append(f"Arjun found {len(endpoint_params)} parameter(s)")
+            suggested.extend(["xss", "sqli", "idor"])
+            confirmed_count = sum(1 for p in endpoint_params if p.get("confirmed"))
+            if confirmed_count:
+                score += 1.0
+                reasons.append(f"{confirmed_count} parameter(s) confirmed by response change")
+            if ep["method"].upper() in {"POST", "PUT", "PATCH"} and any(
+                p.get("param_type") == "body" for p in endpoint_params
+            ):
+                suggested.append("mass_assign")
 
         # Signal: API endpoint
         if _API_PATTERNS.search(path):
@@ -146,13 +167,15 @@ def prioritize_endpoints(
                 seen.add(s)
                 unique_suggested.append(s)
 
-        results.append({
-            "url": url,
-            "method": ep["method"],
-            "priority_score": round(score, 1),
-            "suggested_tests": unique_suggested,
-            "reasons": reasons,
-        })
+        results.append(
+            {
+                "url": url,
+                "method": ep["method"],
+                "priority_score": round(score, 1),
+                "suggested_tests": unique_suggested,
+                "reasons": reasons,
+            }
+        )
 
     # Sort by priority descending
     results.sort(key=lambda x: x["priority_score"], reverse=True)
@@ -168,3 +191,12 @@ def _extract_host(url: str) -> str:
         return urlparse(url).hostname or ""
     except Exception:
         return ""
+
+
+def _endpoint_key(url: str, method: str = "GET") -> tuple[str, str]:
+    try:
+        parsed = urlparse(url)
+        normalized = urlunparse(parsed._replace(query="", fragment=""))
+    except Exception:
+        normalized = url
+    return (method or "GET").upper(), normalized

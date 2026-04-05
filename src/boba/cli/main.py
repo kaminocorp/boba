@@ -413,6 +413,39 @@ enum_app = typer.Typer(help="Enumeration tools.")
 app.add_typer(enum_app, name="enum")
 
 
+@enum_app.command("parameters")
+def enum_parameters(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
+    method: Annotated[str, typer.Option("--method", "-X", help="HTTP method")] = "GET",
+    body_type: Annotated[
+        Optional[str], typer.Option("--body-type", help="POST body type: json or form")
+    ] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Discover hidden parameters using Arjun."""
+    with _managed(data_dir) as manager:
+        from boba.tools import enum
+
+        hunt = manager.get(hunt_id)
+        result = asyncio.run(
+            enum.parameters(manager.context, hunt, url, method=method, body_type=body_type)
+        )
+        if fmt == "json":
+            format_output(
+                {"tool": "arjun", "found": len(result.records), "records": result.records},
+                fmt="json",
+            )
+        else:
+            format_output(
+                result.records,
+                fmt="table",
+                columns=["url", "method", "name", "param_type", "confirmed"],
+                title="Parameters",
+            )
+
+
 @enum_app.command("directories")
 def enum_directories(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
@@ -558,6 +591,25 @@ def ctx_tech(
     with _managed(data_dir) as manager:
         records = manager.context.get_technologies(hunt_id, host=host)
         format_output(records, fmt=fmt, title="Technologies")
+
+
+@context_app.command("parameters")
+def ctx_parameters(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[Optional[str], typer.Option("--url", help="Filter by exact URL")] = None,
+    method: Annotated[Optional[str], typer.Option("--method", help="Filter by method")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """List discovered parameters."""
+    with _managed(data_dir) as manager:
+        records = manager.context.get_parameters(hunt_id, url=url, method=method)
+        format_output(
+            records,
+            fmt=fmt,
+            columns=["url", "method", "name", "param_type", "confirmed", "sources"],
+            title="Parameters",
+        )
 
 
 @context_app.command("directories")
@@ -948,8 +1000,13 @@ app.add_typer(analyze_app, name="analyze")
 def analyze_coverage_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     host: Annotated[Optional[str], typer.Option("--host", help="Filter by host")] = None,
-    untested_only: Annotated[bool, typer.Option("--untested-only", help="Show only untested endpoints")] = False,
-    test_type: Annotated[Optional[str], typer.Option("--test-type", "-t", help="Filter by test types (comma-separated)")] = None,
+    untested_only: Annotated[
+        bool, typer.Option("--untested-only", help="Show only untested endpoints")
+    ] = False,
+    test_type: Annotated[
+        Optional[str],
+        typer.Option("--test-type", "-t", help="Filter by test types (comma-separated)"),
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -971,7 +1028,10 @@ def analyze_coverage_cmd(
             from dataclasses import asdict
 
             summary = get_coverage_summary(
-                manager.context, hunt_id, host=host, test_types=test_types,
+                manager.context,
+                hunt_id,
+                host=host,
+                test_types=test_types,
             )
             if fmt == "json":
                 format_output(asdict(summary), fmt="json")
@@ -993,7 +1053,9 @@ def analyze_coverage_cmd(
 @analyze_app.command("dedupe")
 def analyze_dedupe_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show groups without persisting")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show groups without persisting")
+    ] = False,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1026,14 +1088,21 @@ def analyze_dedupe_cmd(
                     g.reason,
                 )
             console.print(t)
-            print_info(f"{len(groups)} group(s) found, {sum(len(g.finding_ids) for g in groups)} findings grouped.")
+            print_info(
+                f"{len(groups)} group(s) found, {sum(len(g.finding_ids) for g in groups)} findings grouped."
+            )
 
 
 @analyze_app.command("severity")
 def analyze_severity_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    finding_id: Annotated[Optional[int], typer.Option("--finding-id", help="Score a single finding")] = None,
-    platform: Annotated[Optional[str], typer.Option("--platform", help="Include payout estimates (hackerone, bugcrowd)")] = None,
+    finding_id: Annotated[
+        Optional[int], typer.Option("--finding-id", help="Score a single finding")
+    ] = None,
+    platform: Annotated[
+        Optional[str],
+        typer.Option("--platform", help="Include payout estimates (hackerone, bugcrowd)"),
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1048,7 +1117,14 @@ def analyze_severity_cmd(
             print_info("No findings to score.")
             return
 
-        columns = ["finding_id", "title", "finding_type", "cvss_score", "cvss_severity", "cvss_vector"]
+        columns = [
+            "finding_id",
+            "title",
+            "finding_type",
+            "cvss_score",
+            "cvss_severity",
+            "cvss_vector",
+        ]
         if platform:
             columns.extend(["payout_min", "payout_max"])
 
@@ -1058,8 +1134,15 @@ def analyze_severity_cmd(
 @analyze_app.command("chain")
 def analyze_chain_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
-    finding_ids: Annotated[Optional[str], typer.Option("--finding-ids", help="Suggest chains for specific finding IDs (comma-separated)")] = None,
-    validate: Annotated[Optional[int], typer.Option("--validate", help="Mark a chain ID as validated")] = None,
+    finding_ids: Annotated[
+        Optional[str],
+        typer.Option(
+            "--finding-ids", help="Suggest chains for specific finding IDs (comma-separated)"
+        ),
+    ] = None,
+    validate: Annotated[
+        Optional[int], typer.Option("--validate", help="Mark a chain ID as validated")
+    ] = None,
     fmt: FormatOption = "table",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1181,7 +1264,9 @@ def report_draft_cmd(
 def report_format_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     report_id: Annotated[int, typer.Option("--report-id", "-r", help="Report ID")],
-    platform: Annotated[str, typer.Option("--platform", "-p", help="Platform: hackerone, bugcrowd, markdown")] = "markdown",
+    platform: Annotated[
+        str, typer.Option("--platform", "-p", help="Platform: hackerone, bugcrowd, markdown")
+    ] = "markdown",
     data_dir: DataDirOption = None,
 ) -> None:
     """Format a report for a specific platform."""
@@ -1233,7 +1318,9 @@ def report_poc_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     finding_id: Annotated[Optional[int], typer.Option("--finding-id", help="Finding ID")] = None,
     chain_id: Annotated[Optional[int], typer.Option("--chain-id", help="Chain ID")] = None,
-    output_dir: Annotated[str, typer.Option("--output-dir", "-o", help="Output directory")] = "./poc",
+    output_dir: Annotated[
+        str, typer.Option("--output-dir", "-o", help="Output directory")
+    ] = "./poc",
     data_dir: DataDirOption = None,
 ) -> None:
     """Package PoC evidence into a directory."""
@@ -1245,13 +1332,13 @@ def report_poc_cmd(
         from boba.reporting.poc import package_poc
 
         pkg = package_poc(
-            manager.context, hunt_id,
-            finding_id=finding_id, chain_id=chain_id,
+            manager.context,
+            hunt_id,
+            finding_id=finding_id,
+            chain_id=chain_id,
             output_dir=output_dir,
         )
-        print_success(
-            f"PoC packaged: {len(pkg.http_dumps)} HTTP dump(s), output: {pkg.output_dir}"
-        )
+        print_success(f"PoC packaged: {len(pkg.http_dumps)} HTTP dump(s), output: {pkg.output_dir}")
 
 
 @report_app.command("list")
@@ -1319,10 +1406,17 @@ def test_idor_cmd(
             print_error("Session not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_idor(
-            client, sa, sb, endpoint, method,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_idor(
+                client,
+                sa,
+                sb,
+                endpoint,
+                method,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="IDOR Test Result")
 
 
@@ -1346,7 +1440,8 @@ def test_ssrf_cmd(
                 url,
                 method,
                 injection_points=[{"location": "url_param", "name": param}],
-                context=manager.context, hunt_id=hunt_id,
+                context=manager.context,
+                hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="SSRF Test Result")
@@ -1372,7 +1467,8 @@ def test_xss_cmd(
                 url,
                 method,
                 params={param: ""},
-                context=manager.context, hunt_id=hunt_id,
+                context=manager.context,
+                hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="XSS Test Result")
@@ -1398,7 +1494,8 @@ def test_sqli_cmd(
                 url,
                 method,
                 params={param: "1"},
-                context=manager.context, hunt_id=hunt_id,
+                context=manager.context,
+                hunt_id=hunt_id,
             )
         )
         format_output(asdict(result), fmt=fmt, title="SQLi Test Result")
@@ -1417,10 +1514,15 @@ def test_auth_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_auth(
-            client, endpoint, jwt_token=jwt,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_auth(
+                client,
+                endpoint,
+                jwt_token=jwt,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="Auth Test Result")
 
 
@@ -1430,7 +1532,9 @@ def test_race_cmd(
     url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
     method: Annotated[str, typer.Option("--method", "-m", help="HTTP method")] = "POST",
     body: Annotated[Optional[str], typer.Option("--body", "-b", help="Request body")] = None,
-    concurrency: Annotated[int, typer.Option("--concurrency", "-c", help="Concurrent requests")] = 10,
+    concurrency: Annotated[
+        int, typer.Option("--concurrency", "-c", help="Concurrent requests")
+    ] = 10,
     session_name: Annotated[str, typer.Option("--session", "-s", help="Session name")] = "",
     fmt: FormatOption = "json",
     data_dir: DataDirOption = None,
@@ -1450,10 +1554,18 @@ def test_race_cmd(
                 raise typer.Exit(1)
             sess = s
 
-        result = asyncio.run(vuln.test_race(
-            client, sess, url, method, body, concurrency,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_race(
+                client,
+                sess,
+                url,
+                method,
+                body,
+                concurrency,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="Race Condition Test Result")
 
 
@@ -1470,10 +1582,15 @@ def test_redirect_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_redirect(
-            client, url, param,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_redirect(
+                client,
+                url,
+                param,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="Redirect Test Result")
 
 
@@ -1498,10 +1615,17 @@ def test_csrf_cmd(
             print_error(f"Session '{session_name}' not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_csrf(
-            client, sess, url, method, body,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_csrf(
+                client,
+                sess,
+                url,
+                method,
+                body,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="CSRF Test Result")
 
 
@@ -1525,10 +1649,16 @@ def test_mass_assign_cmd(
             print_error(f"Session '{session_name}' not found")
             raise typer.Exit(1)
 
-        result = asyncio.run(vuln.test_mass_assign(
-            client, sess, url, method,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_mass_assign(
+                client,
+                sess,
+                url,
+                method,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="Mass Assignment Test Result")
 
 
@@ -1536,7 +1666,9 @@ def test_mass_assign_cmd(
 def test_reset_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     url: Annotated[str, typer.Option("--url", "-u", help="Reset endpoint URL")],
-    email_param: Annotated[str, typer.Option("--email-param", help="Email parameter name")] = "email",
+    email_param: Annotated[
+        str, typer.Option("--email-param", help="Email parameter name")
+    ] = "email",
     fmt: FormatOption = "json",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1545,10 +1677,15 @@ def test_reset_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_reset(
-            client, url, email_param,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_reset(
+                client,
+                url,
+                email_param,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="Password Reset Test Result")
 
 
@@ -1565,10 +1702,15 @@ def test_ai_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(vuln.test_ai(
-            client, url, param,
-            context=manager.context, hunt_id=hunt_id,
-        ))
+        result = asyncio.run(
+            vuln.test_ai(
+                client,
+                url,
+                param,
+                context=manager.context,
+                hunt_id=hunt_id,
+            )
+        )
         format_output(asdict(result), fmt=fmt, title="AI Prompt Injection Test Result")
 
 
