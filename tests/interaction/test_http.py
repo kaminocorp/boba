@@ -286,3 +286,165 @@ class TestFuzzCombinations:
         assert len(combos) == 4
         assert {"user": "admin", "pass": "1"} in combos
         assert {"user": "root", "pass": "2"} in combos
+
+
+class TestUpload:
+    """Tests for HttpClient.upload() — multipart/form-data file uploads."""
+
+    @pytest.mark.asyncio
+    async def test_upload_single_file_returns_response(self, client):
+        mock_resp = _mock_response(status_code=200, content=b'{"uploaded": true}', text='{"uploaded": true}')
+        client._client.request = AsyncMock(return_value=mock_resp)
+
+        resp = await client.upload(
+            method="POST",
+            url="https://example.com/api/upload",
+            files={"avatar": ("photo.jpg", b"\xff\xd8\xff", "image/jpeg")},
+        )
+        assert resp.status_code == 200
+        assert resp.body == b'{"uploaded": true}'
+
+    @pytest.mark.asyncio
+    async def test_upload_uses_files_kwarg_not_content(self, client):
+        """httpx must receive files= (not content=) so it builds the multipart body."""
+        mock_resp = _mock_response(status_code=200)
+        captured: list[dict] = []
+
+        async def _capture(**kwargs):
+            captured.append(kwargs)
+            return mock_resp
+
+        client._client.request = _capture
+
+        await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"file": ("test.txt", b"hello", "text/plain")},
+            fields={"description": "test file"},
+        )
+
+        assert len(captured) == 1
+        call_kwargs = captured[0]
+        assert "files" in call_kwargs
+        assert "content" not in call_kwargs
+        # fields go as data=
+        assert call_kwargs.get("data") == {"description": "test file"}
+
+    @pytest.mark.asyncio
+    async def test_upload_multiple_files(self, client):
+        mock_resp = _mock_response(status_code=201)
+        captured: list[dict] = []
+
+        async def _capture(**kwargs):
+            captured.append(kwargs)
+            return mock_resp
+
+        client._client.request = _capture
+
+        await client.upload(
+            method="POST",
+            url="https://example.com/batch",
+            files={
+                "file1": ("a.txt", b"aaa", "text/plain"),
+                "file2": ("b.txt", b"bbb", "text/plain"),
+            },
+        )
+
+        assert len(captured) == 1
+        assert len(captured[0]["files"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_upload_recorded_to_history(self, client, sink):
+        mock_resp = _mock_response(status_code=200, content=b"ok")
+        client._client.request = AsyncMock(return_value=mock_resp)
+
+        resp = await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"doc": ("report.pdf", b"%PDF", "application/pdf")},
+        )
+
+        record = sink.get(resp.request_id)
+        assert record is not None
+        assert record["method"] == "POST"
+        assert record["url"] == "https://example.com/"  # mock url
+        # Body summary describes the multipart content
+        assert "multipart" in (record.get("request_body") or "")
+        assert "report.pdf" in (record.get("request_body") or "")
+
+    @pytest.mark.asyncio
+    async def test_upload_cookies_and_headers_forwarded(self, client):
+        mock_resp = _mock_response(status_code=200)
+        captured: list[dict] = []
+
+        async def _capture(**kwargs):
+            captured.append(kwargs)
+            return mock_resp
+
+        client._client.request = _capture
+
+        await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"f": ("x.bin", b"\x00", "application/octet-stream")},
+            headers={"Authorization": "Bearer tok123"},
+            cookies={"session": "abc"},
+        )
+
+        call = captured[0]
+        assert call.get("headers", {}).get("Authorization") == "Bearer tok123"
+        assert call.get("cookies") == {"session": "abc"}
+
+    @pytest.mark.asyncio
+    async def test_upload_custom_timeout_forwarded(self, client):
+        mock_resp = _mock_response(status_code=200)
+        captured: list[dict] = []
+
+        async def _capture(**kwargs):
+            captured.append(kwargs)
+            return mock_resp
+
+        client._client.request = _capture
+
+        await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"f": ("x.bin", b"\x00", "application/octet-stream")},
+            timeout_seconds=120.0,
+        )
+
+        assert captured[0].get("timeout") == 120.0
+
+    @pytest.mark.asyncio
+    async def test_upload_body_size_cap(self, client, sink):
+        """Response bodies exceeding max_response_bytes are truncated."""
+        large_body = b"A" * 100
+        mock_resp = _mock_response(status_code=200, content=large_body, text="A" * 100)
+        client._client.request = AsyncMock(return_value=mock_resp)
+        client._max_response_bytes = 10  # force truncation
+
+        resp = await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"f": ("big.bin", b"\x00", "application/octet-stream")},
+        )
+
+        assert len(resp.body) == 10
+
+    @pytest.mark.asyncio
+    async def test_upload_network_error_returns_zero_status(self, client):
+        """Network failures return status_code=0 and are recorded to history."""
+        import httpx as _httpx
+
+        client._client.request = AsyncMock(
+            side_effect=_httpx.RequestError("connection refused", request=MagicMock())
+        )
+
+        resp = await client.upload(
+            method="POST",
+            url="https://example.com/upload",
+            files={"f": ("x.txt", b"hi", "text/plain")},
+        )
+
+        assert resp.status_code == 0
+        assert resp.body == b""

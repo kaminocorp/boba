@@ -368,6 +368,119 @@ class HttpClient:
             baseline_length=baseline_length,
         )
 
+    async def upload(
+        self,
+        method: str,
+        url: str,
+        files: dict[str, tuple[str, bytes, str]],
+        fields: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        source: str = "http_client",
+        tags: list[str] | None = None,
+        follow_redirects: bool = True,
+        timeout_seconds: float | None = None,
+    ) -> HttpResponse:
+        """Send a multipart/form-data request with file uploads.
+
+        files: mapping of field name → (filename, content_bytes, content_type)
+        fields: additional text form fields sent alongside files
+
+        httpx sets the Content-Type header (including the multipart boundary)
+        automatically when files= is provided — do NOT pass Content-Type manually.
+        """
+        start = time.monotonic()
+        redirect_chain: list[str] = []
+
+        httpx_files = {
+            field_name: (filename, content, content_type)
+            for field_name, (filename, content, content_type) in files.items()
+        }
+
+        req_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "files": httpx_files,
+            "data": fields or {},
+            "headers": headers or {},
+            "cookies": cookies,
+            "follow_redirects": follow_redirects,
+        }
+        if timeout_seconds is not None:
+            req_kwargs["timeout"] = timeout_seconds
+
+        # Human-readable body summary for history — no single string body exists
+        file_names = [fname for fname, _, _ in files.values()]
+        body_summary = f"<multipart: files={file_names}, fields={list((fields or {}).keys())}>"
+
+        try:
+            resp = await self._client.request(**req_kwargs)
+        except httpx.RequestError as exc:
+            elapsed_ms = (time.monotonic() - start) * 1000
+            logger.warning("HTTP upload failed for %s %s: %s", method, url, exc)
+            record_id = self._sink.record(
+                method=method,
+                url=url,
+                request_headers=headers or {},
+                request_body=body_summary,
+                status_code=0,
+                response_headers={},
+                response_body=f"Network error: {exc}".encode(),
+                elapsed_ms=elapsed_ms,
+                source=source,
+                tags=(tags or []) + ["network_error"],
+            )
+            return HttpResponse(
+                request_id=record_id,
+                status_code=0,
+                headers={},
+                body=b"",
+                body_text="",
+                elapsed_ms=elapsed_ms,
+                redirect_chain=[],
+            )
+
+        if resp.history:
+            redirect_chain = [str(r.url) for r in resp.history]
+
+        elapsed_ms = (time.monotonic() - start) * 1000
+        resp_headers = dict(resp.headers)
+        resp_body = resp.content
+        truncated = False
+        if len(resp_body) > self._max_response_bytes:
+            resp_body = resp_body[: self._max_response_bytes]
+            truncated = True
+            logger.warning(
+                "Response body truncated from %d to %d bytes for %s %s",
+                len(resp.content),
+                self._max_response_bytes,
+                method,
+                url,
+            )
+
+        record_id = self._sink.record(
+            method=method,
+            url=str(resp.url) if follow_redirects else url,
+            request_headers=headers or {},
+            request_body=body_summary,
+            status_code=resp.status_code,
+            response_headers=resp_headers,
+            response_body=resp_body,
+            elapsed_ms=elapsed_ms,
+            source=source,
+            tags=tags,
+        )
+
+        return HttpResponse(
+            request_id=record_id,
+            status_code=resp.status_code,
+            headers=resp_headers,
+            body=resp_body,
+            body_text=resp_body.decode("utf-8", errors="replace") if truncated else (resp.text or ""),
+            elapsed_ms=elapsed_ms,
+            redirect_chain=redirect_chain,
+        )
+
     def _generate_combinations(
         self,
         positions: list[str],
