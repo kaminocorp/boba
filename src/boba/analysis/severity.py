@@ -159,8 +159,9 @@ def auto_score_finding(finding: dict[str, Any]) -> CVSSScore:
                 metrics["integrity"] = "H"
 
         elif ftype == "ssrf":
-            # Cloud metadata access → critical (credential theft)
+            # Cloud metadata access → critical (credential theft + role escalation)
             if "cloud_metadata" in evidence_str or "169.254.169.254" in evidence_str:
+                metrics["confidentiality"] = "H"
                 metrics["integrity"] = "H"
             # OOB callback confirmed → higher confidence
             if "oob_callback" in evidence_str:

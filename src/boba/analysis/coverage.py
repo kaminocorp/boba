@@ -90,7 +90,7 @@ def _get_known_endpoints(
     for d in directories:
         endpoint_set.add(d["url"])
 
-    if host and directories:
+    if host:
         endpoint_set = {ep for ep in endpoint_set if urlparse(ep).hostname == host}
 
     return endpoint_set

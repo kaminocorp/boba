@@ -64,6 +64,7 @@ class ArjunAdapter(BaseAdapter):
         tf = tempfile.NamedTemporaryFile(suffix=".json", prefix="boba_arjun_", delete=False)
         tf.close()
         output_file = Path(tf.name)
+        self._temp_files.append(output_file)
 
         cmd = [
             str(self._binary_path),

@@ -57,6 +57,7 @@ class FfufAdapter(BaseAdapter):
         tf = tempfile.NamedTemporaryFile(suffix=".json", prefix="boba_ffuf_", delete=False)
         tf.close()
         output_file = Path(tf.name)
+        self._temp_files.append(output_file)
 
         wordlist = config.extra_args_dict.get("wordlist") or _find_default_wordlist()
         if not wordlist:

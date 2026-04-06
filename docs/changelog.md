@@ -1,5 +1,7 @@
 # Changelog
 
+- [0.6.2](#062--correctness-fixes-scoring-coverage-chaining-temp-files) — 5 correctness fixes: CVSS cloud metadata (confidentiality+integrity), coverage host filter gate, cross-host chaining ordering, temp file leaks (ffuf/arjun), dead code (test_xss/test_sqli). 0 new tests, 0 regressions (722 tests)
+- [0.6.1](#061--bug-fixes-race-test-type--json-import) — 2 bugs in vuln.py: `test_race` inconsistent type on total failure (dedup key), `_bodies_similar` shadowed json import (hot path overhead). 0 new tests, 0 regressions (722 tests)
 - [0.6.0](#060--v4-phase-7-multipart-file-upload) — `upload()` on HttpClient for multipart/form-data file upload testing. Unrestricted upload, path traversal via filename, and SVG/HTML XSS now first-class operations. 1 method, 8 new tests, 0 regressions (722 tests)
 - [0.5.10](#0510--python-312-deprecation-fixes) — `asyncio.get_running_loop()` across all 15 deadline call sites in vuln.py, module-level credential pattern compilation. 0 new tests, 0 regressions (714 tests)
 - [0.5.9](#059--post-audit-correctness-fixes) — 3 correctness fixes from independent multi-agent audit: Kiterunner boost raw-URL lookup, `upsert_api_endpoint` silent host/path drop, `_redact` threshold. 5 new tests, 0 regressions (714 tests)
@@ -48,6 +50,197 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.6.2 — Correctness Fixes: Scoring, Coverage, Chaining, Temp Files
+
+**Date:** 2026-04-06  
+**Scope:** 5 correctness fixes across 5 files. 0 new tests, 0 regressions (722 tests pass).
+
+### CORR-1: CVSS cloud metadata scoring — missing confidentiality vector
+
+> `src/boba/analysis/severity.py:162-164`
+
+SSRF with cloud metadata evidence (`169.254.169.254`) only set `integrity="H"`. The primary impact of IMDSv1 credential theft is **confidentiality** (reading IAM credentials, tokens, service account keys), not integrity alone. The base SSRF rule already set `confidentiality="H"`, so the cloud_metadata branch added integrity without explicitly ensuring confidentiality — getting the right CVSS score (CRITICAL) by accident rather than by design.
+
+The fix sets both vectors explicitly with a clarified comment:
+
+```python
+# Before
+if "cloud_metadata" in evidence_str or "169.254.169.254" in evidence_str:
+    metrics["integrity"] = "H"
+
+# After
+if "cloud_metadata" in evidence_str or "169.254.169.254" in evidence_str:
+    metrics["confidentiality"] = "H"
+    metrics["integrity"] = "H"
+```
+
+The `confidentiality="H"` assignment is technically redundant (already set in the SSRF base rule), but making it explicit documents the reasoning: cloud metadata access is a confidentiality impact *first*, integrity impact *second*. If the base rule ever changes, the cloud_metadata branch still produces the correct score.
+
+### CORR-2: Coverage host filter gated behind directory check
+
+> `src/boba/analysis/coverage.py:93`
+
+Host filter was only applied when `directories` variable was truthy:
+
+```python
+if host and directories:  # host filter only applied when directories exist
+    endpoint_set = {ep for ep in endpoint_set if urlparse(ep).hostname == host}
+```
+
+When `directories` was empty (no directory scan results for a hunt), the host filter was never applied. A per-host coverage query like "what endpoints have we tested on `api.target.com`?" would return endpoints from *all* hosts mixed together — inflating coverage counts and producing misleading reports.
+
+The `directories` variable was irrelevant to whether host filtering should occur — it was just coincidentally truthy in most test scenarios (which is why this wasn't caught earlier).
+
+**Fix:** Removed the `directories` guard:
+
+```python
+if host:
+    endpoint_set = {ep for ep in endpoint_set if urlparse(ep).hostname == host}
+```
+
+### CORR-3: Chaining picks arbitrary finding for cross-host rules
+
+> `src/boba/analysis/chaining.py:311-322`
+
+For cross-host chain rules (e.g., `redirect_to_ssrf`), the code picked the first finding of each required type:
+
+```python
+all_findings.append(type_matches[rtype][0])  # always picks first
+```
+
+`type_matches[rtype]` is populated from a database query with no guaranteed ordering. The selection was effectively random — a low-confidence, INFO-severity SSRF could anchor a chain even when a confirmed, HIGH-severity SSRF existed for a different host.
+
+**Fix:** Sort candidates by severity (descending) then confidence (descending) before selecting:
+
+```python
+_sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+_conf_rank = {"confirmed": 0, "likely": 1, "possible": 2}
+all_findings = []
+for rtype in required:
+    best = sorted(
+        type_matches[rtype],
+        key=lambda f: (
+            _sev_rank.get(f.get("severity", "info"), 4),
+            _conf_rank.get(f.get("confidence", "possible"), 2),
+        ),
+    )
+    all_findings.append(best[0])
+```
+
+The sort is stable — ties preserve insertion order. This ensures the strongest available evidence anchors each chain, producing higher-quality chain scores and more actionable reports.
+
+### CORR-4: Temp file leak in FfufAdapter and ArjunAdapter
+
+> `src/boba/adapters/ffuf.py:57-60`, `src/boba/adapters/arjun.py:64-67`
+
+Both adapters create a temporary output file for the tool to write JSON results into:
+
+```python
+tf = tempfile.NamedTemporaryFile(suffix=".json", prefix="boba_ffuf_", delete=False)
+tf.close()
+output_file = Path(tf.name)
+```
+
+`BaseAdapter` provides `_create_temp_file(lines, suffix)` which writes content *and* appends the path to `self._temp_files` for cleanup. But ffuf/arjun need *empty* output files (the tool writes to them), so they can't use `_create_temp_file()`. The problem is they also never registered the file with `self._temp_files`.
+
+`BaseAdapter._cleanup_temp_files()` iterates `self._temp_files` and deletes each one. Without registration, if the adapter crashed between file creation and the point where it reads + deletes the output file, the temp file persisted on disk indefinitely.
+
+**Fix:** Added `self._temp_files.append(output_file)` immediately after file creation in both adapters:
+
+```python
+tf = tempfile.NamedTemporaryFile(suffix=".json", prefix="boba_ffuf_", delete=False)
+tf.close()
+output_file = Path(tf.name)
+self._temp_files.append(output_file)  # register for cleanup
+```
+
+Now `_cleanup_temp_files()` (called in `BaseAdapter.run()`'s `finally` block) will clean up the file even if the adapter crashes mid-run.
+
+### CORR-5: Redundant `test_params` re-initialization in `test_xss` and `test_sqli`
+
+> `src/boba/tools/vuln.py` (two sites)
+
+Both `test_xss` and `test_sqli` initialized `test_params` at the top of the function and identically re-initialized it after the main detection loop:
+
+**`test_xss`:**
+```python
+test_params = params or {"q": ""}   # line 548 — initial assignment
+# ... ~135 lines of detection logic ...
+test_params = params or {"q": ""}   # line 683 — identical re-assignment (dead code)
+```
+
+**`test_sqli`:**
+```python
+test_params = params or {"id": "1"}  # line 728 — initial assignment
+# ... ~206 lines of detection logic ...
+test_params = params or {"id": "1"}  # line 934 — identical re-assignment (dead code)
+```
+
+The `params` argument is never mutated within the function body, so the second assignment always produces the same result as the first. These are copy-paste artifacts — likely from duplicating the initialization block at the bottom when the persist/coverage code was added.
+
+**Fix:** Removed both redundant lines. The subsequent `param_str = ",".join(test_params.keys())` and coverage loop continue to reference the `test_params` variable set at the top of each function.
+
+---
+
+## 0.6.1 — Bug Fixes: Race Test Type & JSON Import
+
+**Date:** 2026-04-06  
+**Scope:** 2 bugs in `src/boba/tools/vuln.py`. 0 new tests, 0 regressions (722 tests pass).
+
+### BUG-1: `test_race` inconsistent `test_type` on total failure
+
+> `src/boba/tools/vuln.py:1175`
+
+When all concurrent requests in `test_race` raise exceptions (total failure), the function returned `test_type="race_condition"`. Every other code path in `test_race` uses `test_type="race"`, and the finding is persisted via `_persist_finding(…, "race")`.
+
+The `findings` table has a `UNIQUE(hunt_id, finding_type, url, method, parameter)` constraint. The inconsistent type string meant a "total failure" result could never collide with an existing finding row for the same endpoint, silently breaking dedup. If a previous run had recorded a `"race"` finding for the same URL, and a later run hit total failure, the `"race_condition"` result would be treated as a distinct finding rather than an update.
+
+**Fix:**
+
+```python
+# Before
+test_type="race_condition",
+
+# After
+test_type="race",
+```
+
+Single-line change. The `test_type` field is an identity key — it must match everywhere: return values, persistence calls, coverage records, and chain rule `required_types`.
+
+### BUG-2: `_bodies_similar` shadowed module-level `json` import
+
+> `src/boba/tools/vuln.py:2163`
+
+`_bodies_similar()` contained a local import inside the function body:
+
+```python
+import json as _json  # line 2163
+```
+
+The module already imports `json` at line 6:
+
+```python
+import json as _json_mod  # line 6
+```
+
+This created two different aliases for the same module in the same file. The local import worked but had two issues:
+
+1. **Per-call overhead.** Python's `import` statement inside a function body re-executes import machinery on every call (lock acquisition, `sys.modules` dict lookup). `_bodies_similar` is called in hot paths during IDOR comparison loops.
+
+2. **Maintenance trap.** Two aliases (`_json` and `_json_mod`) for the same module invites confusion. A future contributor could reasonably assume `_json` refers to something different, or use the wrong alias in a refactor.
+
+**Fix:** Removed the local `import json as _json` and replaced all 4 usages with the existing module-level `_json_mod`:
+
+| Line | Before | After |
+|------|--------|-------|
+| 2163 | `import json as _json` | *(deleted)* |
+| 2166 | `_json.loads(body_a)` | `_json_mod.loads(body_a)` |
+| 2167 | `_json.loads(body_b)` | `_json_mod.loads(body_b)` |
+| 2177 | `_json.dumps(json_a, ...)` | `_json_mod.dumps(json_a, ...)` |
+| 2178 | `_json.dumps(json_b, ...)` | `_json_mod.dumps(json_b, ...)` |
 
 ---
 

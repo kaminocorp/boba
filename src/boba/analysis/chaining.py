@@ -308,10 +308,19 @@ def _match_rule(
                 return _build_chain(rule, all_findings, finding_ids)
         return None
 
-    # Cross-host: just need one of each type
+    # Cross-host: just need one of each type — pick highest severity/confidence
+    _sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    _conf_rank = {"confirmed": 0, "likely": 1, "possible": 2}
     all_findings = []
     for rtype in required:
-        all_findings.append(type_matches[rtype][0])
+        best = sorted(
+            type_matches[rtype],
+            key=lambda f: (
+                _sev_rank.get(f.get("severity", "info"), 4),
+                _conf_rank.get(f.get("confidence", "possible"), 2),
+            ),
+        )
+        all_findings.append(best[0])
     finding_ids = [f["id"] for f in all_findings]
     return _build_chain(rule, all_findings, finding_ids)
 

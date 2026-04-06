@@ -680,7 +680,6 @@ async def test_xss(
         else [],
         waf_detected=waf_detected,
     )
-    test_params = params or {"q": ""}
     param_str = ",".join(test_params.keys())
     _persist_finding(context, hunt_id, result, url, method, param_str)
     for pname in test_params:
@@ -931,7 +930,6 @@ async def test_sqli(
         else [],
         waf_detected=waf_detected,
     )
-    test_params = params or {"id": "1"}
     param_str = ",".join(test_params.keys())
     _persist_finding(context, hunt_id, result, url, method, param_str)
     for pname in test_params:
@@ -1172,7 +1170,7 @@ async def test_race(
         logger.warning("Race test: %d/%d requests failed", len(errors), concurrency)
     if not responses:
         return VulnTestResult(
-            test_type="race_condition",
+            test_type="race",
             vulnerable=False,
             title="Race condition test failed — all requests errored",
             description=f"All {concurrency} concurrent requests failed.",
@@ -2160,11 +2158,9 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
 
     # Try JSON-aware comparison: if both parse as JSON, compare structure AND values.
     # Key-only comparison would cause false positives (same schema, different user data).
-    import json as _json
-
     try:
-        json_a = _json.loads(body_a)
-        json_b = _json.loads(body_b)
+        json_a = _json_mod.loads(body_a)
+        json_b = _json_mod.loads(body_b)
         keys_a = _extract_json_keys(json_a)
         keys_b = _extract_json_keys(json_b)
         if keys_a and keys_b:
@@ -2174,8 +2170,8 @@ def _bodies_similar(body_a: bytes, body_b: bytes, threshold: float = 0.7) -> boo
             # Same structure — compare serialized values for each shared key
             # to avoid false positives from APIs with identical schemas but
             # different per-user data.
-            flat_a = _json.dumps(json_a, sort_keys=True, default=str)
-            flat_b = _json.dumps(json_b, sort_keys=True, default=str)
+            flat_a = _json_mod.dumps(json_a, sort_keys=True, default=str)
+            flat_b = _json_mod.dumps(json_b, sort_keys=True, default=str)
             if flat_a == flat_b:
                 return True
             # Count matching vs differing value tokens
