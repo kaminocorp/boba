@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.6.3](#063--context-module-split) — `context.py` (2,204 lines) → `context/` package (14 files, 2,399 lines). Mixin-based split: 11 mixins, 70 methods, zero behaviour change. 0 new tests, 0 regressions (722 tests)
 - [0.6.2](#062--correctness-fixes-scoring-coverage-chaining-temp-files) — 5 correctness fixes: CVSS cloud metadata (confidentiality+integrity), coverage host filter gate, cross-host chaining ordering, temp file leaks (ffuf/arjun), dead code (test_xss/test_sqli). 0 new tests, 0 regressions (722 tests)
 - [0.6.1](#061--bug-fixes-race-test-type--json-import) — 2 bugs in vuln.py: `test_race` inconsistent type on total failure (dedup key), `_bodies_similar` shadowed json import (hot path overhead). 0 new tests, 0 regressions (722 tests)
 - [0.6.0](#060--v4-phase-7-multipart-file-upload) — `upload()` on HttpClient for multipart/form-data file upload testing. Unrestricted upload, path traversal via filename, and SVG/HTML XSS now first-class operations. 1 method, 8 new tests, 0 regressions (722 tests)
@@ -50,6 +51,98 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.6.3 — Context Module Split
+
+**Date:** 2026-04-06  
+**Scope:** `src/boba/core/context.py` (2,204 lines) → `src/boba/core/context/` package (14 files, 2,399 lines). Zero-behaviour-change refactor. 0 new tests, 0 regressions (722 tests pass).
+
+### Problem
+
+A single `HuntContext` class in one file contained schema DDL (388 lines), connection lifecycle, migration logic, hunt CRUD, 9 entity upserts, 12 query methods, HTTP history, sessions, findings, OOB listeners, coverage tracking, dedup groups, chains, and reports. Every concern was tangled in a 2,204-line file.
+
+### Approach: Mixins
+
+Three alternatives were evaluated — composition (separate objects, forwarded `conn`), partial-class-via-imports, and mixins. **Mixins won** because `HuntContext` has 70 methods that all share `self._conn` (a single SQLite connection) and `self._in_transaction` (a batch flag). Composition would require threading the connection through every call; partial-class imports break IDE navigation. Mixins let each method reference `self._conn` naturally — at runtime `self` is always a fully-composed `HuntContext`.
+
+### File structure
+
+```
+src/boba/core/context/
+├── __init__.py          157 lines   HuntContext (inherits all mixins), lifecycle, migration
+├── _helpers.py           85 lines   _now, _resolve_upsert_id, _parse_json_field, _json_array_merge
+├── _schema.py           390 lines   _SCHEMA_SQL DDL constant
+├── _hunt_crud.py        119 lines   HuntCrudMixin: create/get/list/update hunt, _row_to_hunt
+├── _upserts.py          475 lines   UpsertMixin: 9 entity upserts + upsert_records batch dispatch
+├── _queries.py          229 lines   QueryMixin: 12 get_* methods, log_tool_run, get_hunt_stats
+├── _http_history.py     150 lines   HttpHistoryMixin: insert/get/query/update HTTP records
+├── _sessions.py          96 lines   SessionMixin: upsert/get/delete/touch sessions
+├── _findings.py         138 lines   FindingMixin: upsert_finding, get_findings, get_finding_by_id
+├── _oob.py               70 lines   OobMixin: insert/update/get OOB listeners
+├── _coverage.py         123 lines   CoverageMixin: upsert/get coverage, get_untested_endpoints
+├── _dedup.py             97 lines   DedupMixin: dedup groups, is_duplicate, get_canonical_finding
+├── _chains.py           105 lines   ChainMixin: upsert/get/delete chains
+└── _reports.py          165 lines   ReportMixin: upsert/get/update reports
+```
+
+All internal modules are `_`-prefixed — they are implementation details. The only public import path remains `from boba.core.context import HuntContext`.
+
+### Class hierarchy
+
+```python
+class HuntContext(
+    HuntCrudMixin,      # hunt CRUD + state machine
+    UpsertMixin,        # 9 entity upserts + batch dispatch
+    QueryMixin,         # 12 get_* methods + tool runs + stats
+    HttpHistoryMixin,   # HTTP request/response history
+    SessionMixin,       # authenticated session management
+    FindingMixin,       # vulnerability findings
+    OobMixin,           # out-of-band listener records
+    CoverageMixin,      # test coverage tracking
+    DedupMixin,         # finding deduplication groups
+    ChainMixin,         # attack chain persistence
+    ReportMixin,        # vulnerability reports
+):
+```
+
+`HuntContext.__init__` is the sole constructor — no mixin has `__init__`. All mixins reference `self._conn`, `self._maybe_commit()`, and `self._in_transaction` which are provided by `HuntContext`.
+
+### Mixin stubs
+
+Two mixins (`UpsertMixin`, `CoverageMixin`) call `self._maybe_commit()`, which is defined in `__init__.py`, not in the mixin itself. They include a stub:
+
+```python
+def _maybe_commit(self) -> None: ...  # provided by HuntContext
+```
+
+`DedupMixin` has a similar stub for `self.get_finding_by_id()` from `FindingMixin` — the only cross-mixin method call in the codebase. MRO ensures all three stubs are shadowed by their real implementations at runtime.
+
+### What stays in `__init__.py`
+
+Connection lifecycle methods stay in `__init__.py` because they manage the shared state all mixins depend on: `__init__`, `_create_tables`, `_maybe_migrate`, `_maybe_commit`, `close`, `__enter__`, `__exit__`.
+
+### Import compatibility
+
+All 20+ callers use `from boba.core.context import HuntContext`. Python resolves `boba.core.context` to `boba/core/context/__init__.py` identically to how it resolved `boba/core/context.py` — zero caller changes required.
+
+One backward-compat re-export: `tests/test_fixes_0214.py` imports `from boba.core.context import _parse_json_field`, which `__init__.py` re-exports from `_helpers.py` via `__all__`.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Method count | 70/70 — all present in both old and new |
+| Top-level functions | 4/4 identical (`_now`, `_resolve_upsert_id`, `_parse_json_field`, `_json_array_merge`) |
+| Method body diff | 69/70 identical; 1 expected diff (`_maybe_commit` stub in `UpsertMixin`) |
+| `_SCHEMA_SQL` DDL | Identical (character-for-character) |
+| Class attributes | `_VALID_TRANSITIONS` in `_hunt_crud.py`, `_STATS_TABLES` in `_queries.py` — both present |
+| MRO | 12-class chain; all 3 stubs shadowed by real implementations |
+| Import compatibility | `from boba.core.context import HuntContext` and `_parse_json_field` both resolve |
+| `__all__` | Exports `HuntContext` and `_parse_json_field` |
+| Test suite | **722 passed** in 18.52s — zero regressions |
+| Lint | `ruff check` and `ruff format --check` clean across all 14 files |
 
 ---
 

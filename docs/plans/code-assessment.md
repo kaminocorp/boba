@@ -106,27 +106,11 @@ In `test_xss`, `test_params = params or {"q": ""}` is defined at line 548 and id
 
 ## Part 3: Refactoring Required (>500 Lines)
 
-### R1. Split `core/context.py` (2,204 lines)
+### R1. Split `core/context.py` (2,204 lines) — DONE
 
-**Problem:** A single `HuntContext` class handles schema definition, migration, hunt CRUD, 9 entity upserts, 10+ query methods, HTTP history, sessions, findings, OOB listeners, coverage, dedup groups, chains, and reports. Functionally correct but extremely difficult to navigate.
+Completed 2026-04-06. See [completion notes](../completions/code-assessment-p3-r1-context-split.md).
 
-**Proposed split (package `src/boba/core/context/`):**
-
-| New file | Contents | Est. lines |
-|---|---|---|
-| `context/schema.py` | `_SCHEMA_SQL`, `_SCHEMA_MIGRATIONS` | ~500 |
-| `context/core.py` | `HuntContext.__init__`, hunt CRUD, `_maybe_migrate`, `upsert_records`, `get_hunt_stats` | ~400 |
-| `context/upserts.py` | All `upsert_*` methods (subdomain, host, port, url, technology, directory, parameter, secret, api_endpoint, session, finding, oob_listener, coverage, dedup_group, chain, report) | ~800 |
-| `context/queries.py` | All `get_*` / `query_*` / `delete_*` / `update_*` methods | ~500 |
-
-`context/__init__.py` re-exports `HuntContext` so all callers are unchanged.
-
-**Minimum viable refactor (if full split is deferred):** Extract `_SCHEMA_SQL` into `context/schema.py`. This alone removes ~486 lines from `context.py`, bringing it to ~1,700 lines and making the class body navigable.
-
-**Additional notes:**
-- `upsert_secret` NULL `line_number` case creates ~130 lines of near-duplicate SQL (SQLite NULL distinctness in UNIQUE constraints). Extracting into a private `_upsert_secret_null_line` helper would reduce visual duplication.
-- `upsert_report` has local variables `_UPDATE_SET` and `_INSERT_COLS` defined inline — should be module-level or class constants.
-- `get_hunt_stats` uses f-string SQL interpolation from a hardcoded `frozenset` (no injection risk, `# noqa: S608` is correct). Could be refactored to a single `UNION ALL` query to reduce round-trips.
+Split into 14-file `context/` package using mixin classes. `HuntContext` inherits 11 mixins (`HuntCrudMixin`, `UpsertMixin`, `QueryMixin`, `HttpHistoryMixin`, `SessionMixin`, `FindingMixin`, `OobMixin`, `CoverageMixin`, `DedupMixin`, `ChainMixin`, `ReportMixin`). Largest file is `_upserts.py` (475 lines), smallest is `_oob.py` (70 lines). Zero import changes across 20+ callers. 722 tests pass.
 
 ---
 
@@ -287,7 +271,7 @@ The unimplemented items are all Phase 2/3 tooling from the vision doc. They repr
 | Layer | Verdict | Key Issues |
 |---|---|---|
 | **Adapters** (`src/boba/adapters/`) | Good | Temp file leak in ffuf/arjun (CORR-4), `_safe_int` duplication |
-| **Core** (`src/boba/core/`) | Good (context.py needs split) | R1 monolith, `get_hunt_stats` f-string SQL |
+| **Core** (`src/boba/core/`) | Good (context.py split done) | R1 complete, `get_hunt_stats` f-string SQL |
 | **Interaction** (`src/boba/interaction/`) | Good | CSS escaping gaps, `_get_page` remnant, `_request_counts` fragility |
 | **Tools** (`src/boba/tools/`) | Functional (vuln.py needs split) | BUG-1, BUG-2, CORR-5, R2 monolith |
 | **Analysis** (`src/boba/analysis/`) | Good with edge cases | CORR-1 (CVSS), CORR-2 (coverage), CORR-3 (chaining), dedup redundancy |
@@ -298,30 +282,34 @@ The unimplemented items are all Phase 2/3 tooling from the vision doc. They repr
 
 ## Prioritized Action List
 
-### P0 — Bugs (fix now, 1-line changes)
+### P0 — Bugs (fix now, 1-line changes) — DONE
 
-| # | Action | File | Effort |
+Completed 2026-04-06. See [completion notes](../completions/code-assessment-p1-bugs.md).
+
+| # | Action | File | Status |
 |---|---|---|---|
-| BUG-1 | Fix `test_type="race_condition"` → `"race"` | `vuln.py:1175` | 1 line |
-| BUG-2 | Remove inline `import json as _json`, use `_json_mod` | `vuln.py:2163` | 3 lines |
+| BUG-1 | Fix `test_type="race_condition"` → `"race"` | `vuln.py:1175` | Done |
+| BUG-2 | Remove inline `import json as _json`, use `_json_mod` | `vuln.py:2163` | Done |
 
-### P1 — Correctness issues (fix this week)
+### P1 — Correctness issues (fix this week) — DONE
 
-| # | Action | File | Effort |
+Completed 2026-04-06. See [completion notes](../completions/code-assessment-p2-correctness.md).
+
+| # | Action | File | Status |
 |---|---|---|---|
-| CORR-1 | Fix CVSS cloud metadata: `integrity="H"` → `confidentiality="H"` | `severity.py:163` | 1 line |
-| CORR-2 | Move coverage host filter outside directory check | `coverage.py:93` | 3 lines |
-| CORR-3 | Sort chain candidates by severity before selecting | `chaining.py:314` | 2 lines |
-| CORR-4 | Use `_create_temp_file()` in ffuf/arjun adapters | `ffuf.py:57`, `arjun.py:64` | 2 lines each |
-| CORR-5 | Remove redundant `test_params` re-init (2 sites) | `vuln.py:683, 934` | 2 lines |
+| CORR-1 | CVSS cloud metadata: set both `confidentiality="H"` and `integrity="H"` | `severity.py:163` | Done |
+| CORR-2 | Move coverage host filter outside directory check | `coverage.py:93` | Done |
+| CORR-3 | Sort chain candidates by severity before selecting | `chaining.py:314` | Done |
+| CORR-4 | Register temp files via `self._temp_files.append()` in ffuf/arjun | `ffuf.py:60`, `arjun.py:67` | Done |
+| CORR-5 | Remove redundant `test_params` re-init (2 sites) | `vuln.py:683, 934` | Done |
 
 ### P2 — Refactoring (plan and execute over 1–2 weeks)
 
-| # | Action | File(s) | Effort |
+| # | Action | File(s) | Status |
 |---|---|---|---|
-| R1 | Split `context.py` → `context/` package | `core/context.py` | Large |
-| R2 | Split `vuln.py` → `vuln/` package | `tools/vuln.py` | Large |
-| R3 | Split `cli/main.py` → `cli/commands/` package | `cli/main.py` | Large |
+| R1 | Split `context.py` → `context/` package (mixin classes) | `core/context/` (14 files) | Done — see [completion notes](../completions/code-assessment-p3-r1-context-split.md) |
+| R2 | Split `vuln.py` → `vuln/` package | `tools/vuln.py` | Pending |
+| R3 | Split `cli/main.py` → `cli/commands/` package | `cli/main.py` | Pending |
 
 ### P3 — Code quality (address during refactoring)
 
