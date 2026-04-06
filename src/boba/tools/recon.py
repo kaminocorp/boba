@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from pathlib import Path
+
+import httpx
 
 from boba.adapters.gau import GauAdapter
+from boba.adapters.gitleaks import GitleaksAdapter
 from boba.adapters.httpx_runner import HttpxRunnerAdapter
 from boba.adapters.naabu import NaabuAdapter
 from boba.adapters.subfinder import SubfinderAdapter
@@ -17,6 +21,50 @@ from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
 
 logger = logging.getLogger(__name__)
+_GITHUB_API_BASE = "https://api.github.com"
+
+
+def _is_repo_locator(target: str) -> bool:
+    """Return True when target is a concrete repo path/URL, not an org/user handle."""
+    if not target:
+        return False
+    if target.startswith(("http://", "https://", "ssh://", "git@")):
+        return True
+    expanded = Path(target).expanduser()
+    return target.startswith(("/", "./", "../", "~/")) or expanded.exists()
+
+
+async def _list_public_github_repos(owner: str) -> list[str]:
+    """Enumerate public repos for a GitHub org/user handle."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "boba",
+    }
+    repos: list[str] = []
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
+        page = 1
+        while True:
+            resp = await client.get(
+                f"{_GITHUB_API_BASE}/users/{owner}/repos",
+                params={"per_page": 100, "page": page, "type": "public"},
+            )
+            if resp.status_code == 404:
+                raise ValueError(f"GitHub org/user '{owner}' not found")
+            resp.raise_for_status()
+            payload = resp.json()
+            if not isinstance(payload, list):
+                raise ValueError(f"Unexpected GitHub API response for '{owner}'")
+            if not payload:
+                break
+            repos.extend(
+                item.get("clone_url") or item.get("html_url") or ""
+                for item in payload
+                if isinstance(item, dict)
+            )
+            if len(payload) < 100:
+                break
+            page += 1
+    return [repo for repo in repos if repo]
 
 
 async def subdomains(
@@ -191,6 +239,84 @@ async def tech(
         context.upsert_records(hunt.id, "technology", flat_techs, source="whatweb")
     context.log_tool_run(hunt.id, result)
     return result
+
+
+async def secrets(
+    context: HuntContext,
+    hunt: Hunt,
+    target: str,
+    repo: str | None = None,
+    config: AdapterConfig | None = None,
+) -> ToolResult:
+    """
+    Scan git repositories for leaked secrets using gitleaks.
+
+    target: GitHub org, user, or repo path/URL.
+    repo: specific repo URL (overrides target).
+    """
+    explicit_repo = repo or target
+    if not explicit_repo:
+        return _empty_result("gitleaks")
+
+    config = copy.deepcopy(config) if config else AdapterConfig()
+    if repo:
+        scan_targets = [repo]
+    elif _is_repo_locator(target):
+        scan_targets = [target]
+    else:
+        try:
+            scan_targets = await _list_public_github_repos(target)
+        except Exception as exc:
+            logger.warning("Failed to enumerate GitHub repos for %s: %s", target, exc)
+            return ToolResult(
+                tool_name="gitleaks",
+                command=[],
+                exit_code=1,
+                raw_stdout="",
+                raw_stderr=str(exc),
+                duration_seconds=0.0,
+                records=[],
+            )
+
+    if not scan_targets:
+        return _empty_result("gitleaks")
+
+    scope = ScopeEngine(hunt.scope)
+    if len(scan_targets) == 1:
+        adapter = GitleaksAdapter(scope_engine=scope)
+        result = await adapter.run(targets=scan_targets, config=config)
+        context.upsert_records(hunt.id, "secret", result.records, source="gitleaks")
+        context.log_tool_run(hunt.id, result)
+        return result
+
+    merged_records: list[dict] = []
+    total_filtered = 0
+    total_duration = 0.0
+    exit_code = 0
+    stderr_parts: list[str] = []
+
+    for scan_target in scan_targets:
+        adapter = GitleaksAdapter(scope_engine=scope)
+        result = await adapter.run(targets=[scan_target], config=config)
+        context.upsert_records(hunt.id, "secret", result.records, source="gitleaks")
+        context.log_tool_run(hunt.id, result)
+        merged_records.extend(result.records)
+        total_filtered += result.filtered_count
+        total_duration += result.duration_seconds
+        exit_code = max(exit_code, result.exit_code)
+        if result.raw_stderr.strip():
+            stderr_parts.append(result.raw_stderr.strip())
+
+    return ToolResult(
+        tool_name="gitleaks",
+        command=[],
+        exit_code=exit_code,
+        raw_stdout="",
+        raw_stderr="\n".join(stderr_parts),
+        duration_seconds=total_duration,
+        records=merged_records,
+        filtered_count=total_filtered,
+    )
 
 
 def _empty_result(tool_name: str) -> ToolResult:

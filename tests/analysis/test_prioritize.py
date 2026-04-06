@@ -28,6 +28,17 @@ def _add_url(context, hunt_id, url, method="GET"):
     )
 
 
+def _add_api_endpoint(context, hunt_id, url, method="GET", **kwargs):
+    record = {
+        "url": url,
+        "method": method,
+        "host": url.split("//")[1].split("/")[0],
+        "path": "/" + "/".join(url.split("//")[1].split("/")[1:]),
+        **kwargs,
+    }
+    context.upsert_api_endpoint(hunt_id, record, source="kiterunner")
+
+
 # ═══════════════════ Scoring ═══════════════════
 
 
@@ -281,3 +292,75 @@ class TestCLIPrioritize:
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) == 1
+
+
+# ═══════════════════ API Endpoint Prioritization ═══════════════════
+
+
+class TestApiEndpointPrioritization:
+    def test_kiterunner_endpoint_gets_higher_score(self, context, hunt_id):
+        _add_url(context, hunt_id, "https://app.example.com/page")
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        api_ep = next(r for r in results if "/api/v2/users" in r["url"])
+        page_ep = next(r for r in results if "/page" in r["url"])
+        assert api_ep["priority_score"] > page_ep["priority_score"]
+        assert "Kiterunner-discovered API endpoint" in api_ep["reasons"]
+
+    def test_state_changing_method_bonus(self, context, hunt_id):
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/transfer", "POST")
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        get_ep = next(r for r in results if "/api/v2/users" in r["url"])
+        post_ep = next(r for r in results if "/api/v2/transfer" in r["url"])
+        assert post_ep["priority_score"] > get_ep["priority_score"]
+        assert any("State-changing" in reason for reason in post_ep["reasons"])
+
+    def test_api_endpoint_suggests_idor_auth(self, context, hunt_id):
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        ep = results[0]
+        assert "idor" in ep["suggested_tests"]
+        assert "auth" in ep["suggested_tests"]
+
+    def test_post_api_endpoint_suggests_mass_assign(self, context, hunt_id):
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/profile", "PUT")
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        ep = results[0]
+        assert "mass_assign" in ep["suggested_tests"]
+
+    def test_same_url_different_methods_are_kept_separate(self, context, hunt_id):
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "POST")
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        matches = [r for r in results if r["url"] == "https://app.example.com/api/v2/users"]
+        assert len(matches) == 2
+        assert {r["method"] for r in matches} == {"GET", "POST"}
+
+    def test_coverage_only_excludes_matching_method(self, context, hunt_id):
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "POST")
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/api/v2/users",
+                "method": "GET",
+                "test_type": "idor",
+            },
+        )
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        matches = [r for r in results if r["url"] == "https://app.example.com/api/v2/users"]
+        assert len(matches) == 1
+        assert matches[0]["method"] == "POST"

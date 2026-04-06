@@ -116,6 +116,14 @@ class TestContextQueryValidation:
         with pytest.raises(HuntNotFoundError):
             context.get_parameters("nonexistent")
 
+    def test_get_secrets_invalid_hunt(self, context):
+        with pytest.raises(HuntNotFoundError):
+            context.get_secrets("nonexistent")
+
+    def test_get_api_endpoints_invalid_hunt(self, context):
+        with pytest.raises(HuntNotFoundError):
+            context.get_api_endpoints("nonexistent")
+
     def test_get_tool_runs_invalid_hunt(self, context):
         with pytest.raises(HuntNotFoundError):
             context.get_tool_runs("nonexistent")
@@ -129,6 +137,8 @@ class TestContextQueryValidation:
         assert context.get_technologies(sample_hunt.id) == []
         assert context.get_directories(sample_hunt.id) == []
         assert context.get_parameters(sample_hunt.id) == []
+        assert context.get_secrets(sample_hunt.id) == []
+        assert context.get_api_endpoints(sample_hunt.id) == []
         assert context.get_tool_runs(sample_hunt.id) == []
 
 

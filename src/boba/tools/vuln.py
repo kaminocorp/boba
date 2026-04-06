@@ -171,6 +171,7 @@ async def test_idor(
         tags=["idor", "user_a"],
     )
     request_ids.append(resp_a.request_id)
+    collected_responses.append(resp_a)
 
     # Request as User B (attacker)
     resp_b = await http_client.request(
@@ -195,6 +196,7 @@ async def test_idor(
         tags=["idor", "no_auth"],
     )
     request_ids.append(resp_unauth.request_id)
+    collected_responses.append(resp_unauth)
 
     # Analyze
     vulnerable = False
@@ -1888,6 +1890,216 @@ async def test_ai(
     )
     _persist_finding(context, hunt_id, result, url, "GET", param)
     _record_coverage(context, hunt_id, url, "GET", param, "ai")
+    return result
+
+
+async def test_ai_conversation(
+    http_client: HttpClient,
+    url: str,
+    session: SessionState | None = None,
+    conversations: list[list[str]] | None = None,
+    tool_payloads: list[str] | None = None,
+    indirect_payloads: list[str] | None = None,
+    content_type: str = "application/json",
+    message_field: str = "message",
+    history_field: str = "messages",
+    scope_engine: Any | None = None,
+    context: HuntContext | None = None,
+    hunt_id: str = "",
+    max_test_seconds: float = 300,
+) -> VulnTestResult:
+    """Test LLM features with multi-turn conversations, tool abuse, and indirect injection.
+
+    Unlike test_ai (single GET requests), this sends POST requests with JSON bodies
+    and accumulates conversation history across turns.
+    """
+    if scope_engine and not scope_engine.is_in_scope(url):
+        return VulnTestResult(
+            test_type="ai",
+            vulnerable=False,
+            title=f"Multi-turn prompt injection on {url}",
+            description=f"Skipped: {url} is out of scope",
+        )
+
+    if conversations is None:
+        conversations = ai_payloads.CONVERSATIONS
+    if tool_payloads is None:
+        tool_payloads = ai_payloads.TOOL_ABUSE
+    if indirect_payloads is None:
+        indirect_payloads = ai_payloads.INDIRECT
+
+    request_ids: list[int] = []
+    evidence: list[dict[str, Any]] = []
+    collected_responses: list[HttpResponse] = []
+    headers = dict(session.headers) if session else {}
+    cookies = dict(session.cookies) if session else {}
+    if "Content-Type" not in headers and "content-type" not in headers:
+        headers["Content-Type"] = content_type
+    vulnerable = False
+    confidence = Confidence.POSSIBLE
+    _deadline = asyncio.get_event_loop().time() + max_test_seconds
+
+    _cred_patterns = [re.compile(p, re.IGNORECASE) for p in ai_payloads.CREDENTIAL_PATTERNS]
+
+    def _check_response(body_text: str, payload: str, request_id: int) -> bool:
+        nonlocal vulnerable, confidence
+        body_lower = body_text.lower()
+
+        for marker in ai_payloads.CANARY_MARKERS:
+            if marker.lower() in body_lower:
+                vulnerable = True
+                confidence = Confidence.CONFIRMED
+                evidence.append(
+                    {
+                        "type": "instruction_override",
+                        "payload": payload,
+                        "marker": marker,
+                        "request_id": request_id,
+                    }
+                )
+                return True
+
+        strong = sum(2 for ind in ai_payloads.LEAK_INDICATORS_STRONG if ind in body_lower)
+        weak = sum(1 for ind in ai_payloads.LEAK_INDICATORS_WEAK if ind in body_lower)
+        leak_score = strong + weak
+        if leak_score >= 4:
+            vulnerable = True
+            confidence = Confidence.LIKELY
+            evidence.append(
+                {
+                    "type": "system_prompt_leak",
+                    "payload": payload,
+                    "leak_score": leak_score,
+                    "request_id": request_id,
+                }
+            )
+            return True
+
+        for indicator in ai_payloads.TOOL_ABUSE_INDICATORS:
+            if indicator in body_lower:
+                vulnerable = True
+                confidence = Confidence.LIKELY
+                evidence.append(
+                    {
+                        "type": "function_call",
+                        "payload": payload,
+                        "indicator": indicator,
+                        "request_id": request_id,
+                    }
+                )
+                return True
+
+        for pattern in _cred_patterns:
+            if pattern.search(body_text):
+                vulnerable = True
+                confidence = Confidence.CONFIRMED
+                evidence.append(
+                    {
+                        "type": "credential_leak",
+                        "payload": payload,
+                        "request_id": request_id,
+                    }
+                )
+                return True
+
+        return False
+
+    # Mode 1: Multi-turn conversations
+    for conversation in conversations:
+        if vulnerable:
+            break
+        if asyncio.get_event_loop().time() > _deadline:
+            logger.warning("test_ai_conversation timed out on %s", url)
+            break
+
+        history: list[str] = []
+        for turn in conversation:
+            if asyncio.get_event_loop().time() > _deadline:
+                break
+
+            body = _json_mod.dumps({message_field: turn, history_field: history})
+            resp = await http_client.request(
+                method="POST",
+                url=url,
+                headers=headers,
+                cookies=cookies,
+                body=body,
+                source="test_ai_conversation",
+                tags=["ai", "conversation"],
+            )
+            request_ids.append(resp.request_id)
+            collected_responses.append(resp)
+            history.append(turn)
+
+            if _check_response(resp.body_text, turn, resp.request_id):
+                break
+
+    # Mode 2: Tool abuse (single-turn POST)
+    if not vulnerable:
+        for payload in tool_payloads:
+            if asyncio.get_event_loop().time() > _deadline:
+                break
+
+            body = _json_mod.dumps({message_field: payload})
+            resp = await http_client.request(
+                method="POST",
+                url=url,
+                headers=headers,
+                cookies=cookies,
+                body=body,
+                source="test_ai_conversation",
+                tags=["ai", "tool_abuse"],
+            )
+            request_ids.append(resp.request_id)
+            collected_responses.append(resp)
+
+            if _check_response(resp.body_text, payload, resp.request_id):
+                break
+
+    # Mode 3: Indirect injection (single-turn POST)
+    if not vulnerable:
+        for payload in indirect_payloads:
+            if asyncio.get_event_loop().time() > _deadline:
+                break
+
+            body = _json_mod.dumps({message_field: payload})
+            resp = await http_client.request(
+                method="POST",
+                url=url,
+                headers=headers,
+                cookies=cookies,
+                body=body,
+                source="test_ai_conversation",
+                tags=["ai", "indirect"],
+            )
+            request_ids.append(resp.request_id)
+            collected_responses.append(resp)
+
+            if _check_response(resp.body_text, payload, resp.request_id):
+                break
+
+    waf_detected = not vulnerable and _detect_waf(collected_responses)
+    result = VulnTestResult(
+        test_type="ai",
+        vulnerable=vulnerable,
+        confidence=confidence,
+        title=f"Multi-turn prompt injection on {url}",
+        description="LLM prompt injection detected via conversation" if vulnerable else "",
+        severity=Severity.HIGH if vulnerable else Severity.INFO,
+        evidence=evidence,
+        request_ids=request_ids,
+        recommendations=[
+            "Implement input sanitization for LLM inputs",
+            "Use system prompt protection techniques",
+            "Separate user input from system instructions",
+            "Restrict tool/function calling to whitelisted operations",
+        ]
+        if vulnerable
+        else [],
+        waf_detected=waf_detected,
+    )
+    _persist_finding(context, hunt_id, result, url, "POST", "")
+    _record_coverage(context, hunt_id, url, "POST", "", "ai")
     return result
 
 

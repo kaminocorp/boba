@@ -42,16 +42,28 @@ def prioritize_endpoints(
     urls = context.get_urls(hunt_id)
     directories = context.get_directories(hunt_id)
     parameters = context.get_parameters(hunt_id)
+    api_endpoints = context.get_api_endpoints(hunt_id)
 
     # Build endpoint set with dedup
-    endpoints: dict[str, dict[str, Any]] = {}
+    endpoints: dict[tuple[str, str], dict[str, Any]] = {}
     for u in urls:
-        key = u["url"]
-        endpoints[key] = {"url": key, "method": u.get("method", "GET")}
+        method = (u.get("method") or "GET").upper()
+        key = _endpoint_key(u["url"], method)
+        current = endpoints.get(key)
+        if current is None or (not urlparse(current["url"]).query and urlparse(u["url"]).query):
+            endpoints[key] = {"url": u["url"], "method": method}
     for d in directories:
-        key = d["url"]
+        key = _endpoint_key(d["url"], "GET")
         if key not in endpoints:
-            endpoints[key] = {"url": key, "method": "GET"}
+            endpoints[key] = {"url": d["url"], "method": "GET"}
+
+    # Track which endpoints came from Kiterunner (API discovery)
+    api_endpoint_keys: set[tuple[str, str]] = set()
+    for ep in api_endpoints:
+        method = (ep.get("method") or "GET").upper()
+        ep_key = _endpoint_key(ep["url"], method)
+        api_endpoint_keys.add(ep_key)
+        endpoints[ep_key] = {"url": ep["url"], "method": method}
 
     if not endpoints:
         return []
@@ -63,7 +75,7 @@ def prioritize_endpoints(
 
     # Get already-tested URLs for exclusion
     coverage = context.get_coverage(hunt_id)
-    tested_urls = {r["url"] for r in coverage}
+    tested_endpoints = {_endpoint_key(r["url"], r.get("method", "GET")) for r in coverage}
 
     # Get "hot hosts" — hosts where findings exist
     findings = context.get_findings(hunt_id)
@@ -78,11 +90,11 @@ def prioritize_endpoints(
     # Score each untested endpoint
     results: list[dict[str, Any]] = []
 
-    for ep in endpoints.values():
+    for endpoint_key, ep in endpoints.items():
         url = ep["url"]
 
         # Skip already-tested
-        if url in tested_urls:
+        if endpoint_key in tested_endpoints:
             continue
 
         score = 0.0
@@ -94,7 +106,7 @@ def prioritize_endpoints(
         path = parsed.path or ""
         query = parsed.query or ""
         host = parsed.hostname or ""
-        endpoint_params = params_by_endpoint.get(_endpoint_key(url, ep["method"]), [])
+        endpoint_params = params_by_endpoint.get(endpoint_key, [])
 
         # Signal: has query parameters
         params = parse_qs(query, keep_blank_values=True)
@@ -117,8 +129,22 @@ def prioritize_endpoints(
             ):
                 suggested.append("mass_assign")
 
-        # Signal: API endpoint
-        if _API_PATTERNS.search(path):
+        # Signal: Kiterunner-discovered API endpoint
+        ep_lookup = (ep["method"].upper(), url)
+        if ep_lookup in api_endpoint_keys:
+            score += 3.0
+            reasons.append("Kiterunner-discovered API endpoint")
+            if "idor" not in suggested:
+                suggested.append("idor")
+            if "auth" not in suggested:
+                suggested.append("auth")
+            if ep["method"].upper() in {"POST", "PUT", "DELETE", "PATCH"}:
+                score += 1.5
+                reasons.append(f"State-changing method ({ep['method'].upper()})")
+                if "mass_assign" not in suggested:
+                    suggested.append("mass_assign")
+        # Signal: API endpoint (path-based)
+        elif _API_PATTERNS.search(path):
             score += 2.0
             reasons.append("API endpoint")
             if "idor" not in suggested:

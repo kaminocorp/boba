@@ -146,6 +146,107 @@ class TestTech:
         assert names == {"nginx", "PHP"}
 
 
+class TestSecrets:
+    async def test_secrets_persists_results(self, manager, sample_hunt):
+        records = [
+            {
+                "rule_id": "aws-access-key-id",
+                "secret_type": "key",
+                "file_path": "config/deploy.env",
+                "repo": "https://github.com/acme/webapp",
+                "line_number": 42,
+                "match_preview": "AKIA****XMPL",
+                "commit": "a1b2c3d",
+                "author": "dev@acme.com",
+                "date": "2025-11-03",
+                "entropy": 4.2,
+            },
+            {
+                "rule_id": "github-pat",
+                "secret_type": "token",
+                "file_path": "scripts/ci.sh",
+                "repo": "https://github.com/acme/webapp",
+                "line_number": 5,
+                "match_preview": "ghp_****7890",
+                "commit": "b2c3d4e",
+                "author": "ci@acme.com",
+                "date": "2025-12-01",
+                "entropy": 3.8,
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("gitleaks", records))
+
+        with patch("boba.tools.recon.GitleaksAdapter.run", mock_run):
+            result = await recon.secrets(
+                manager.context, sample_hunt, "https://github.com/acme/webapp"
+            )
+
+        assert len(result.records) == 2
+        saved = manager.context.get_secrets(sample_hunt.id)
+        assert len(saved) == 2
+        rule_ids = {s["rule_id"] for s in saved}
+        assert "aws-access-key-id" in rule_ids
+        assert "github-pat" in rule_ids
+
+    async def test_secrets_empty_target(self, manager, sample_hunt):
+        result = await recon.secrets(manager.context, sample_hunt, "")
+        assert result.records == []
+        assert result.tool_name == "gitleaks"
+        assert result.duration_seconds == 0.0
+
+    async def test_secrets_tool_run_logged(self, manager, sample_hunt):
+        records = [
+            {
+                "rule_id": "generic-api-key",
+                "secret_type": "key",
+                "file_path": "src/config.py",
+                "repo": "https://github.com/acme/webapp",
+                "line_number": 10,
+                "match_preview": "sk_l****cdef",
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("gitleaks", records))
+
+        with patch("boba.tools.recon.GitleaksAdapter.run", mock_run):
+            await recon.secrets(manager.context, sample_hunt, "https://github.com/acme/webapp")
+
+        runs = manager.context.get_tool_runs(sample_hunt.id)
+        assert any(r["tool_name"] == "gitleaks" for r in runs)
+
+    async def test_secrets_org_target_enumerates_repos(self, manager, sample_hunt):
+        repos = [
+            "https://github.com/acme/webapp.git",
+            "https://github.com/acme/tools.git",
+        ]
+
+        async def run_side_effect(*, targets, config):
+            repo = targets[0]
+            return _make_result(
+                "gitleaks",
+                [
+                    {
+                        "rule_id": "generic-api-key",
+                        "secret_type": "key",
+                        "file_path": "src/config.py",
+                        "repo": repo,
+                        "line_number": 10,
+                        "match_preview": "sk_l****cdef",
+                    }
+                ],
+            )
+
+        with (
+            patch("boba.tools.recon._list_public_github_repos", AsyncMock(return_value=repos)),
+            patch("boba.tools.recon.GitleaksAdapter.run", AsyncMock(side_effect=run_side_effect)),
+        ):
+            result = await recon.secrets(manager.context, sample_hunt, "acme")
+
+        assert len(result.records) == 2
+        saved = manager.context.get_secrets(sample_hunt.id)
+        assert len(saved) == 2
+        assert {row["repo"] for row in saved} == set(repos)
+
+
 class TestToolRunLogged:
     async def test_tool_run_logged(self, manager, sample_hunt):
         records = [{"subdomain": "test.example.com", "source": "subfinder"}]

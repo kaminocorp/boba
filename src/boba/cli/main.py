@@ -371,6 +371,50 @@ def recon_urls(
             )
 
 
+@recon_app.command("secrets")
+def recon_secrets(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    target: Annotated[
+        Optional[str], typer.Option("--target", "-t", help="GitHub org, user, or repo path")
+    ] = None,
+    repo: Annotated[
+        Optional[str], typer.Option("--repo", "-r", help="Specific repo URL (overrides target)")
+    ] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Scan git repositories for leaked secrets using gitleaks."""
+    with _managed(data_dir) as manager:
+        from boba.tools import recon
+
+        if not target and not repo:
+            raise typer.BadParameter("Provide either --target or --repo")
+
+        hunt = manager.get(hunt_id)
+        result = asyncio.run(recon.secrets(manager.context, hunt, target or "", repo=repo))
+        if fmt == "json":
+            format_output(
+                {
+                    "tool": "gitleaks",
+                    "found": len(result.records),
+                    "filtered": result.filtered_count,
+                    "records": result.records,
+                },
+                fmt="json",
+            )
+        else:
+            format_output(
+                result.records,
+                fmt="table",
+                columns=["rule_id", "secret_type", "file_path", "match_preview", "repo"],
+                title="Secrets",
+            )
+            print_info(
+                f"Found {len(result.records)} secret(s) "
+                f"({result.filtered_count} filtered out-of-scope)"
+            )
+
+
 @recon_app.command("tech")
 def recon_tech(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
@@ -516,6 +560,51 @@ def enum_crawl(
             )
 
 
+@enum_app.command("api")
+def enum_api(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    url: Annotated[Optional[str], typer.Option("--url", "-u", help="Target URL")] = None,
+    targets: Annotated[
+        Optional[str], typer.Option("--targets", "-t", help="Comma-separated target URLs")
+    ] = None,
+    wordlist: Annotated[
+        Optional[str], typer.Option("--wordlist", "-w", help="Kiterunner wordlist path")
+    ] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """Discover API endpoints using Kiterunner."""
+    with _managed(data_dir) as manager:
+        from boba.tools import enum
+
+        hunt = manager.get(hunt_id)
+        target_list = _parse_targets(targets)
+        result = asyncio.run(
+            enum.api(manager.context, hunt, url=url, targets=target_list, wordlist=wordlist)
+        )
+        if fmt == "json":
+            format_output(
+                {
+                    "tool": "kiterunner",
+                    "found": len(result.records),
+                    "filtered": result.filtered_count,
+                    "records": result.records,
+                },
+                fmt="json",
+            )
+        else:
+            format_output(
+                result.records,
+                fmt="table",
+                columns=["method", "status_code", "url", "content_type", "content_length"],
+                title="API Endpoints",
+            )
+            print_info(
+                f"Found {len(result.records)} API endpoint(s) "
+                f"({result.filtered_count} filtered out-of-scope)"
+            )
+
+
 # ═══════════════════ CONTEXT COMMANDS ═══════════════════
 
 context_app = typer.Typer(help="Query discovered data.")
@@ -609,6 +698,57 @@ def ctx_parameters(
             fmt=fmt,
             columns=["url", "method", "name", "param_type", "confirmed", "sources"],
             title="Parameters",
+        )
+
+
+@context_app.command("secrets")
+def ctx_secrets(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    type_: Annotated[
+        Optional[str],
+        typer.Option(
+            "--type", help="Filter by secret type (key, token, password, certificate, other)"
+        ),
+    ] = None,
+    repo: Annotated[Optional[str], typer.Option("--repo", help="Filter by repository")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """List discovered secrets."""
+    with _managed(data_dir) as manager:
+        records = manager.context.get_secrets(hunt_id, secret_type=type_, repo=repo)
+        format_output(
+            records,
+            fmt=fmt,
+            columns=[
+                "rule_id",
+                "secret_type",
+                "file_path",
+                "match_preview",
+                "repo",
+                "line_number",
+                "commit_sha",
+            ],
+            title="Secrets",
+        )
+
+
+@context_app.command("api-endpoints")
+def ctx_api_endpoints(
+    hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
+    host: Annotated[Optional[str], typer.Option("--host", help="Filter by host")] = None,
+    method: Annotated[Optional[str], typer.Option("--method", help="Filter by HTTP method")] = None,
+    fmt: FormatOption = "table",
+    data_dir: DataDirOption = None,
+) -> None:
+    """List discovered API endpoints."""
+    with _managed(data_dir) as manager:
+        records = manager.context.get_api_endpoints(hunt_id, host=host, method=method)
+        format_output(
+            records,
+            fmt=fmt,
+            columns=["method", "status_code", "url", "host", "path", "content_type", "framework"],
+            title="API Endpoints",
         )
 
 
@@ -1694,6 +1834,15 @@ def test_ai_cmd(
     hunt_id: Annotated[str, typer.Argument(help="Hunt ID")],
     url: Annotated[str, typer.Option("--url", "-u", help="Target URL")],
     param: Annotated[str, typer.Option("--param", "-p", help="Parameter name")] = "message",
+    mode: Annotated[
+        str, typer.Option("--mode", "-m", help="Test mode: single or conversation")
+    ] = "single",
+    message_field: Annotated[
+        str, typer.Option("--message-field", help="JSON field for message (conversation mode)")
+    ] = "message",
+    history_field: Annotated[
+        str, typer.Option("--history-field", help="JSON field for history (conversation mode)")
+    ] = "messages",
     fmt: FormatOption = "json",
     data_dir: DataDirOption = None,
 ) -> None:
@@ -1702,15 +1851,27 @@ def test_ai_cmd(
         from boba.tools import vuln
         from dataclasses import asdict
 
-        result = asyncio.run(
-            vuln.test_ai(
-                client,
-                url,
-                param,
-                context=manager.context,
-                hunt_id=hunt_id,
+        if mode == "conversation":
+            result = asyncio.run(
+                vuln.test_ai_conversation(
+                    client,
+                    url,
+                    message_field=message_field,
+                    history_field=history_field,
+                    context=manager.context,
+                    hunt_id=hunt_id,
+                )
             )
-        )
+        else:
+            result = asyncio.run(
+                vuln.test_ai(
+                    client,
+                    url,
+                    param,
+                    context=manager.context,
+                    hunt_id=hunt_id,
+                )
+            )
         format_output(asdict(result), fmt=fmt, title="AI Prompt Injection Test Result")
 
 

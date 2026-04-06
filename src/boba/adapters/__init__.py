@@ -12,7 +12,9 @@ def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
     """Lazy import to avoid circular dependencies."""
     from boba.adapters.arjun import ArjunAdapter
     from boba.adapters.ffuf import FfufAdapter
+    from boba.adapters.gitleaks import GitleaksAdapter
     from boba.adapters.gau import GauAdapter
+    from boba.adapters.kiterunner import KiterunnerAdapter
     from boba.adapters.httpx_runner import HttpxRunnerAdapter
     from boba.adapters.katana import KatanaAdapter
     from boba.adapters.naabu import NaabuAdapter
@@ -23,6 +25,8 @@ def get_adapter_registry() -> dict[str, type[BaseAdapter]]:
 
     return {
         "arjun": ArjunAdapter,
+        "gitleaks": GitleaksAdapter,
+        "kiterunner": KiterunnerAdapter,
         "subfinder": SubfinderAdapter,
         "httpx": HttpxRunnerAdapter,
         "naabu": NaabuAdapter,

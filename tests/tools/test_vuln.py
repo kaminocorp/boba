@@ -153,6 +153,27 @@ class TestIDOR:
         )
         assert result.vulnerable is False
 
+    @pytest.mark.asyncio
+    async def test_idor_waf_detected(self, sink, session_a, session_b):
+        """Blocking pages across the standard 3-request IDOR flow surface WAF detection."""
+        client = HttpClient(sink)
+        call_count = 0
+
+        async def mock_request(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _make_response(403, "Request blocked by cloudflare firewall", call_count)
+
+        client.request = mock_request
+        result = await vuln.test_idor(
+            client,
+            session_a,
+            session_b,
+            endpoint="https://app.example.com/api/users/123",
+        )
+        assert result.vulnerable is False
+        assert result.waf_detected is True
+
 
 class TestSSRF:
     @pytest.mark.asyncio

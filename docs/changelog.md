@@ -1,5 +1,9 @@
 # Changelog
 
+- [0.5.7](#057--v4-enrichment-prod-readiness-fixes) — 8 production-readiness fixes across gitleaks target handling, method-aware prioritization, AI conversation detection, secret dedupe, and IDOR WAF signaling. 10 new tests, 0 regressions (709 tests)
+- [0.5.6](#056--v4-phase-6-ai-multi-turn-conversation) — `test_ai_conversation()` for POST/JSON chatbot testing. Multi-turn escalation, tool abuse, indirect injection, credential leak detection. 1 function, ~11 new tests, 0 regressions (699 tests)
+- [0.5.5](#055--v4-phase-5-api-surface-mapping) — Kiterunner adapter discovers REST endpoints invisible to crawlers. `api_endpoints` table, prioritization integration, CLI commands. 1 adapter, 1 table, ~30 new tests, 0 regressions (688 tests)
+- [0.5.4](#054--v4-phase-4-secret-scanning) — Gitleaks adapter scans git repos for leaked credentials. `secrets` table with redaction, type classification, CLI commands. 1 adapter, 1 table, ~31 new tests, 0 regressions (658 tests)
 - [0.5.3](#053--v4-phase-3-parameter-discovery) — Arjun adapter for hidden parameter discovery, `parameters` table, prioritization integration, CLI commands. 1 adapter, 1 table, 0 regressions (627 tests)
 - [0.5.2](#052--v4-phase-2-ai-chain-rules) — 4 AI-aware chain rules, stable evidence type identifiers. Prompt injection findings now chain with XSS, auth bypass, tool abuse. 0 regressions (608 tests)
 - [0.5.1](#051--v4-phase-1-waf-detection) — `waf_detected` signal on VulnTestResult. All 11 vuln engines now distinguish WAF blocking from clean endpoints. 0 regressions (600 tests)
@@ -40,6 +44,191 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.7 — V4 Enrichment Prod Readiness Fixes
+
+**Date:** 2026-04-06  
+**Scope:** 8 functional fixes across V4 phases 4-6. Secret scanning now honors explicit repo/org targets instead of filtering them out by `github.com`, method-specific API endpoints stay distinct in prioritization, AI conversation mode correctly detects AWS keys and respects explicitly disabled modes, and IDOR now surfaces WAF blocking on the standard 3-request flow. 10 new tests, 0 regressions (709 tests pass).
+
+The V4 phase implementations were feature-complete, but a production-readiness review found a handful of contract-level gaps: GitHub-backed secret findings were being dropped as out-of-scope for normal hunts, org/user secret scanning was documented but not implemented, coverage/prioritization collapsed GET and POST endpoints onto the same URL key, uppercase AWS access keys were missed in AI conversation mode, and IDOR WAF detection did not collect enough responses to ever fire on the baseline owner/attacker/unauth flow. This release closes those gaps without changing the external V4 feature set.
+
+### HIGH — Secret scanning now works for real hunts
+
+> `src/boba/adapters/gitleaks.py`  
+> `src/boba/tools/recon.py`  
+> `src/boba/cli/main.py`
+
+- **Gitleaks scope handling fixed** — `GitleaksAdapter` no longer post-filters findings against `github.com` or local filesystem paths. Secret scanning now trusts the explicitly requested repo/org target instead of incorrectly treating the repo host as the hunted asset.
+- **GitHub org/user enumeration implemented** — `recon.secrets()` now expands org/user handles through the public GitHub repos API and scans each discovered repo, aggregating the results for persistence and CLI output.
+- **CLI contract fixed** — `boba recon secrets` now accepts `--repo` without requiring a dummy `--target`, while still raising a clear error if neither `--target` nor `--repo` is provided.
+
+### MEDIUM — Secret dedupe no longer breaks on missing line numbers
+
+> `src/boba/core/context.py`
+
+- **`upsert_secret()` now handles `line_number IS NULL` correctly** — SQLite UNIQUE constraints treat `NULL` values as distinct, so repeated scans of the same secret with no line metadata inserted duplicates. The upsert path now detects existing NULL-line rows explicitly and updates them in place instead of creating duplicates.
+
+### MEDIUM — Prioritization is now method-aware end-to-end
+
+> `src/boba/analysis/prioritize.py`
+
+- **Method-specific endpoints preserved** — Kiterunner discoveries are now keyed by normalized `(method, url)` pairs, so `GET /api/users` and `POST /api/users` no longer overwrite each other in the priority queue.
+- **Coverage filtering fixed** — tested coverage is also keyed by `(method, url)`, so recording coverage for one method no longer suppresses untested write methods on the same route.
+
+### MEDIUM — AI conversation detection correctness tightened
+
+> `src/boba/tools/vuln.py`
+
+- **AWS credential leaks detected correctly** — credential regexes are now matched against the raw response body (case-insensitive) instead of a lowercased copy, so uppercase AWS access keys (`AKIA...`) are no longer missed.
+- **Explicitly disabled modes stay disabled** — `test_ai_conversation()` now only fills in default `conversations`, `tool_payloads`, and `indirect_payloads` when the caller passes `None`; passing `[]` now truly disables that mode instead of silently restoring defaults.
+
+### LOW — IDOR WAF signal now works on the standard flow
+
+> `src/boba/tools/vuln.py`
+
+- **Baseline IDOR responses are now included in WAF detection** — the owner and unauthenticated responses are added to the WAF sample set, so the usual 3-request IDOR flow can now correctly produce `waf_detected=True` when all three responses are blocked by the same template page.
+
+### Test updates
+
+- Added regression tests for:
+  - gitleaks explicit-target passthrough
+  - GitHub org repo enumeration in `recon.secrets()`
+  - secret dedupe when `line_number` is NULL
+  - method-aware prioritization and method-aware coverage exclusion
+  - repo-only `boba recon secrets --repo ...`
+  - AWS key detection in `test_ai_conversation()`
+  - empty-list mode disabling in `test_ai_conversation()`
+  - IDOR WAF detection on the baseline 3-request flow
+
+---
+
+## 0.5.6 — V4 Phase 6: AI Multi-Turn Conversation
+
+**Date:** 2026-04-06
+**Scope:** V4 enrichment Phase 6. New `test_ai_conversation()` enables multi-turn POST/JSON chatbot testing with three attack modes: gradual escalation conversations, tool/function abuse probes, and indirect injection. 11 new tests, 0 regressions (699 tests pass).
+
+Before this change, `test_ai` sent single GET requests with payloads in a query parameter. Real LLM features are conversational — POST endpoints accepting JSON with message history. The most effective prompt injection techniques (few-shot jailbreaking, context pollution, gradual escalation) require multi-turn interaction. This phase transforms Boba's AI testing from "inject one string" to "have a conversation that leads to compromise."
+
+### NEW — Conversation, tool abuse, and indirect injection payloads
+
+> `src/boba/payloads/ai.py`
+
+- `CONVERSATIONS` — 5 multi-turn conversation payloads: gradual escalation, few-shot jailbreak, context window pollution, role confusion, instruction smuggling via base64 encoding
+- `TOOL_ABUSE` — 5 single-turn probes targeting function/tool calling capability
+- `INDIRECT` — 4 indirect injection payloads: HTML comment injection, system tag injection, conversation format smuggling, markdown separator injection
+- `TOOL_ABUSE_INDICATORS` — 7 response indicators for tool/function abuse detection (`function_call`, `tool_use`, `tool_result`, `action_input`, etc.)
+- `CREDENTIAL_PATTERNS` — 4 compiled regexes for credential leak detection: generic API keys, AWS access keys (`AKIA…`), OpenAI/Anthropic keys (`sk-…`), GitHub PATs (`ghp_…`)
+
+### NEW — `test_ai_conversation()`
+
+> `src/boba/tools/vuln.py`
+
+Multi-turn AI testing function that POSTs JSON bodies and accumulates conversation history across turns. Three attack modes run sequentially, stopping on first confirmed finding:
+
+1. **Conversations** — sends each turn with accumulated history, checking every response for canary markers and leak indicators
+2. **Tool abuse** — single-turn probes targeting function calling (no history needed)
+3. **Indirect injection** — payloads embedded in structured content the LLM processes
+
+Five detection types: canary markers (CONFIRMED), system prompt leak indicators (LIKELY), tool abuse response patterns (LIKELY), credential regex patterns (CONFIRMED), WAF blocking. Evidence is tagged with `instruction_override`, `system_prompt_leak`, `function_call`, and `credential_leak` types that the AI chain rules from Phase 2 match against. Configurable `message_field` and `history_field` parameters adapt to different API shapes. Deadline enforcement via `max_test_seconds` caps total wall-clock time across all modes.
+
+### UPDATED — CLI `boba test ai`
+
+> `src/boba/cli/main.py`
+
+Added flags: `--mode` (`single` | `conversation`, default: `single`), `--message-field` (default: `message`), `--history-field` (default: `messages`). Default behavior unchanged — `--mode single` still calls `test_ai()`.
+
+---
+
+## 0.5.5 — V4 Phase 5: API Surface Mapping
+
+**Date:** 2026-04-06
+**Scope:** V4 enrichment Phase 5. Kiterunner adapter discovers API endpoints invisible to crawlers — REST conventions like `POST /api/v2/transfers` that aren't linked from the frontend. `api_endpoints` table, prioritization integration, CLI commands. 1 adapter, 1 table, ~30 new tests, 0 regressions (688 tests pass).
+
+Before this change, the agent could only test endpoints found via crawling (katana) or historical URL discovery (gau/waybackurls). Kiterunner understands REST patterns and tests multiple HTTP methods per path — it surfaces state-changing endpoints that are prime targets for IDOR, auth bypass, and mass assignment. Kiterunner-discovered API endpoints now get a higher base priority score than crawler-found URLs, and state-changing methods (POST, PUT, DELETE, PATCH) get an additional score bonus.
+
+### NEW — `KiterunnerAdapter`
+
+> `src/boba/adapters/kiterunner.py`
+
+- `TOOL_NAME = "kiterunner"`, `BINARY_NAMES = ["kr"]`, `OUTPUT_FORMAT = OutputFormat.PLAIN_LINES`, `PRODUCES = "api_endpoint"`, `SCOPE_MODE = "pre"`
+- Parses Kiterunner's plain-text output format (`GET  200 [4521, 45, 12] https://…`) via `_KR_LINE_RE` regex; fallback parser handles non-standard lines
+- Also accepts JSON dict input for future `-oJ` flag usage
+- Command shape: `kr scan <url> [-w <wordlist>] [-x <rate_limit>] --fail-status-codes 404,400`
+- Registered in adapter registry (`adapters/__init__.py`)
+
+### NEW — `api_endpoints` table
+
+> `src/boba/core/context.py`
+
+- Schema: `(hunt_id, url, method, status_code, content_type, content_length, host, path, framework, sources, created_at, updated_at)`
+- Unique constraint: `(hunt_id, url, method)` — same endpoint with different methods gets separate rows
+- `upsert_api_endpoint()`: merges sources, COALESCE-preserves `status_code`/`content_length`, preserves non-empty `content_type`/`framework`
+- `get_api_endpoints()`: filterable by `host` and `method`
+- Indexed on `(hunt_id)` and `(hunt_id, host)`; `api_endpoints` added to `_STATS_TABLES`
+
+### NEW — `enum.api()` tool function
+
+> `src/boba/tools/enum.py`
+
+Composition function: pulls alive hosts from context if no explicit targets, scope check → `KiterunnerAdapter.run()` → persist via `upsert_records` → log tool run. Accepts `wordlist` override via `AdapterConfig.extra_args_dict`.
+
+### UPDATED — Prioritization integration
+
+> `src/boba/analysis/prioritize.py`
+
+Kiterunner-discovered endpoints join the scoring pool with `+3.0` base (vs `+2.0` for path-pattern-matched API endpoints). State-changing methods (POST, PUT, DELETE, PATCH) add `+1.5`. All Kiterunner endpoints suggest `idor` + `auth`; state-changing methods also suggest `mass_assign`. The Kiterunner signal takes precedence over the existing API-path-pattern signal via `elif` to avoid double-counting.
+
+### NEW — CLI commands
+
+> `src/boba/cli/main.py`
+
+- `boba enum api <hunt-id> [--url <url>] [--targets <urls>] [--wordlist <path>]` — run Kiterunner discovery
+- `boba context api-endpoints <hunt-id> [--host <host>] [--method <method>]` — query persisted endpoints
+
+---
+
+## 0.5.4 — V4 Phase 4: Secret Scanning
+
+**Date:** 2026-04-06
+**Scope:** V4 enrichment Phase 4. Gitleaks adapter scans git repositories for leaked credentials, API keys, and sensitive configuration. Secrets are redacted before persistence. `secrets` table with type classification, CLI commands. 1 adapter, 1 table, ~31 new tests, 0 regressions (658 tests pass).
+
+Leaked AWS keys, GitHub tokens, and database passwords in public repos are instant P1 Critical findings that require zero interaction with live systems. Before this change the agent had no way to reach them. Secret scanning is now a first-class recon step — results are persisted, redacted (first 4 + last 4 characters, middle replaced with `****`), classified by type, and queryable by `secret_type` or `repo`.
+
+### NEW — `GitleaksAdapter`
+
+> `src/boba/adapters/gitleaks.py`
+
+- `TOOL_NAME = "gitleaks"`, `OUTPUT_FORMAT = OutputFormat.JSON_ARRAY`, `PRODUCES = "secret"`, `SCOPE_MODE = "post"`
+- Parses gitleaks' PascalCase JSON output (`RuleID`, `Secret`, `File`, `StartLine`, `Commit`, `Author`, `Date`, `Entropy`); accepts lowercase variants for forward compatibility
+- `_redact()`: keeps first 4 + last 4 chars, replaces middle with `****`; secrets ≤8 chars fully redacted to `****` — full values never reach the database
+- `_classify_secret_type()`: maps ~40 known gitleaks rule IDs to `key`, `token`, `password`, `certificate`, or `other`; unknown rules inferred from rule name keywords
+- Registered in adapter registry (`adapters/__init__.py`)
+
+### NEW — `secrets` table
+
+> `src/boba/core/context.py`
+
+- Schema: `(hunt_id, rule_id, secret_type, file_path, repo, line_number, match_preview, commit_sha, author, date, entropy, sources, created_at)`
+- Unique constraint: `(hunt_id, repo, file_path, rule_id, line_number)`
+- Column named `commit_sha` (not `commit`) to avoid SQLite reserved keyword conflict; `upsert_secret()` maps transparently from `record["commit"]`
+- `upsert_secret()`: merges sources, preserves non-empty `match_preview`/`commit_sha`/`author`, COALESCE-preserves `entropy`
+- `get_secrets()`: filterable by `secret_type` and `repo`
+- Indexed on `(hunt_id)` and `(hunt_id, secret_type)`; `secrets` added to `_STATS_TABLES`
+
+### NEW — `recon.secrets()` tool function
+
+> `src/boba/tools/recon.py`
+
+Accepts a target (GitHub org, user, or local repo path/URL) and optional specific `repo` URL. Scope enforcement via `SCOPE_MODE = "post"` — the repo URL hostname is the scope target. Persists via `upsert_records(..., "secret", ...)`, logs tool run, returns early with empty result for empty targets.
+
+### NEW — CLI commands
+
+> `src/boba/cli/main.py`
+
+- `boba recon secrets <hunt-id> [--target <org/user>] [--repo <url>]` — run gitleaks scanning
+- `boba context secrets <hunt-id> [--type key|token|password|certificate|other] [--repo <url>]` — query persisted secrets
 
 ---
 

@@ -8,6 +8,7 @@ import logging
 from boba.adapters.arjun import ArjunAdapter
 from boba.adapters.ffuf import FfufAdapter
 from boba.adapters.katana import KatanaAdapter
+from boba.adapters.kiterunner import KiterunnerAdapter
 from boba.core.context import HuntContext
 from boba.core.models import AdapterConfig, Hunt, ToolResult
 from boba.core.scope import ScopeEngine
@@ -100,5 +101,47 @@ async def crawl(
     adapter = KatanaAdapter(scope_engine=scope)
     result = await adapter.run(targets=targets, config=config)
     context.upsert_records(hunt.id, "url", result.records, source="katana")
+    context.log_tool_run(hunt.id, result)
+    return result
+
+
+async def api(
+    context: HuntContext,
+    hunt: Hunt,
+    url: str | None = None,
+    targets: list[str] | None = None,
+    wordlist: str | None = None,
+    config: AdapterConfig | None = None,
+) -> ToolResult:
+    """
+    Discover API endpoints using Kiterunner.
+
+    If no targets given, pulls alive host URLs from context.
+    """
+    if targets is None and url:
+        targets = [url]
+    elif targets is None:
+        alive = context.get_hosts(hunt.id, alive_only=True)
+        targets = [h["url"] for h in alive if h.get("url")]
+
+    if not targets:
+        return ToolResult(
+            tool_name="kiterunner",
+            command=[],
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            duration_seconds=0.0,
+            records=[],
+        )
+
+    config = copy.deepcopy(config) if config else AdapterConfig()
+    if wordlist:
+        config.extra_args_dict["wordlist"] = wordlist
+
+    scope = ScopeEngine(hunt.scope)
+    adapter = KiterunnerAdapter(scope_engine=scope)
+    result = await adapter.run(targets=targets, config=config)
+    context.upsert_records(hunt.id, "api_endpoint", result.records, source="kiterunner")
     context.log_tool_run(hunt.id, result)
     return result

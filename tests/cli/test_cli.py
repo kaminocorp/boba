@@ -453,6 +453,257 @@ class TestContextParameters:
         assert any(r["name"] == "role" for r in data)
 
 
+class TestContextSecrets:
+    def test_secrets_empty(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(app, ["context", "secrets", hunt_id, "--data-dir", str(tmp_path)])
+        assert result.exit_code == 0
+
+    def test_secrets_with_data(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "secret",
+            [
+                {
+                    "rule_id": "aws-access-key-id",
+                    "secret_type": "key",
+                    "file_path": "config/deploy.env",
+                    "repo": "https://github.com/acme/webapp",
+                    "line_number": 42,
+                    "match_preview": "AKIA****XMPL",
+                    "source": "gitleaks",
+                }
+            ],
+            source="gitleaks",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            ["context", "secrets", hunt_id, "--format", "json", "--data-dir", str(tmp_path)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["rule_id"] == "aws-access-key-id"
+
+    def test_secrets_json(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "secret",
+            [
+                {
+                    "rule_id": "github-pat",
+                    "secret_type": "token",
+                    "file_path": "scripts/ci.sh",
+                    "repo": "https://github.com/acme/tools",
+                    "line_number": 5,
+                    "match_preview": "ghp_****7890",
+                    "source": "gitleaks",
+                }
+            ],
+            source="gitleaks",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            ["context", "secrets", hunt_id, "--format", "json", "--data-dir", str(tmp_path)],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert any(r["rule_id"] == "github-pat" for r in data)
+
+
+class TestReconSecretsCLI:
+    def test_recon_secrets_accepts_repo_without_target(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        records = [
+            {
+                "rule_id": "generic-api-key",
+                "secret_type": "key",
+                "file_path": "src/config.py",
+                "repo": "https://github.com/acme/webapp.git",
+                "line_number": 10,
+                "match_preview": "sk_l****cdef",
+            }
+        ]
+        mock_fn = AsyncMock(return_value=_make_result("gitleaks", records))
+
+        with patch("boba.tools.recon.secrets", mock_fn):
+            result = runner.invoke(
+                app,
+                [
+                    "recon",
+                    "secrets",
+                    hunt_id,
+                    "--repo",
+                    "https://github.com/acme/webapp.git",
+                    "--data-dir",
+                    str(tmp_path),
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "src/config.py" in result.output
+
+    def test_recon_secrets_requires_target_or_repo(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "recon",
+                "secrets",
+                hunt_id,
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Provide either --target or --repo" in result.output
+
+    def test_secrets_filter_by_type(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "secret",
+            [
+                {
+                    "rule_id": "aws-access-key-id",
+                    "secret_type": "key",
+                    "file_path": "config.env",
+                    "repo": "https://github.com/acme/webapp",
+                    "line_number": 1,
+                },
+                {
+                    "rule_id": "github-pat",
+                    "secret_type": "token",
+                    "file_path": "ci.sh",
+                    "repo": "https://github.com/acme/webapp",
+                    "line_number": 5,
+                },
+            ],
+            source="gitleaks",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "secrets",
+                hunt_id,
+                "--type",
+                "key",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["secret_type"] == "key"
+
+
+class TestContextApiEndpoints:
+    def test_api_endpoints_empty(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        result = runner.invoke(
+            app, ["context", "api-endpoints", hunt_id, "--data-dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0
+
+    def test_api_endpoints_with_data(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "api_endpoint",
+            [
+                {
+                    "url": "https://api.example.com/api/v2/users",
+                    "method": "GET",
+                    "status_code": 200,
+                    "content_type": "application/json",
+                    "host": "api.example.com",
+                    "path": "/api/v2/users",
+                }
+            ],
+            source="kiterunner",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "api-endpoints",
+                hunt_id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["method"] == "GET"
+        assert data[0]["url"] == "https://api.example.com/api/v2/users"
+
+    def test_api_endpoints_filter_by_host(self, tmp_path):
+        hunt_id = _create_hunt(tmp_path)
+        mgr = _insert_manager(tmp_path)
+        mgr.context.upsert_records(
+            hunt_id,
+            "api_endpoint",
+            [
+                {
+                    "url": "https://api.example.com/api/v2/users",
+                    "method": "GET",
+                    "host": "api.example.com",
+                    "path": "/api/v2/users",
+                },
+                {
+                    "url": "https://other.example.com/api/v1/data",
+                    "method": "GET",
+                    "host": "other.example.com",
+                    "path": "/api/v1/data",
+                },
+            ],
+            source="kiterunner",
+        )
+        mgr.close_context()
+
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "api-endpoints",
+                hunt_id,
+                "--host",
+                "api.example.com",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["host"] == "api.example.com"
+
+
 class TestContextRuns:
     def test_runs_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)

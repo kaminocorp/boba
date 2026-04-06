@@ -220,6 +220,47 @@ CREATE TABLE IF NOT EXISTS parameters (
     UNIQUE(hunt_id, url, method, name, param_type)
 );
 
+CREATE TABLE IF NOT EXISTS secrets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    rule_id         TEXT NOT NULL,
+    secret_type     TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    repo            TEXT NOT NULL DEFAULT '',
+    line_number     INTEGER,
+    match_preview   TEXT NOT NULL DEFAULT '',
+    commit_sha      TEXT NOT NULL DEFAULT '',
+    author          TEXT NOT NULL DEFAULT '',
+    date            TEXT NOT NULL DEFAULT '',
+    entropy         REAL,
+    sources         TEXT NOT NULL DEFAULT '[]',
+    created_at      TEXT NOT NULL,
+    UNIQUE(hunt_id, repo, file_path, rule_id, line_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_secrets_hunt ON secrets(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_secrets_type ON secrets(hunt_id, secret_type);
+
+CREATE TABLE IF NOT EXISTS api_endpoints (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hunt_id         TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+    url             TEXT NOT NULL,
+    method          TEXT NOT NULL DEFAULT 'GET',
+    status_code     INTEGER,
+    content_type    TEXT NOT NULL DEFAULT '',
+    content_length  INTEGER,
+    host            TEXT NOT NULL DEFAULT '',
+    path            TEXT NOT NULL DEFAULT '',
+    framework       TEXT NOT NULL DEFAULT '',
+    sources         TEXT NOT NULL DEFAULT '[]',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(hunt_id, url, method)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_hunt ON api_endpoints(hunt_id);
+CREATE INDEX IF NOT EXISTS idx_api_host ON api_endpoints(hunt_id, host);
+
 CREATE TABLE IF NOT EXISTS tool_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     hunt_id          TEXT NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
@@ -891,6 +932,191 @@ class HuntContext:
         )
         self._maybe_commit()
 
+    def upsert_secret(self, hunt_id: str, record: dict[str, Any], source: str = "") -> None:
+        now = _now()
+        sources_json = json.dumps([source]) if source else "[]"
+        rule_id = record.get("rule_id", "unknown")
+        secret_type = record.get("secret_type", "other")
+        file_path = record.get("file_path", "")
+        repo = record.get("repo", "")
+        line_number = record.get("line_number")
+        match_preview = record.get("match_preview", "")
+        commit_sha = record.get("commit", record.get("commit_sha", ""))
+        author = record.get("author", "")
+        date = record.get("date", "")
+        entropy = record.get("entropy")
+
+        if line_number is None:
+            existing = self._conn.execute(
+                """SELECT id FROM secrets
+                WHERE hunt_id = ? AND repo = ? AND file_path = ? AND rule_id = ?
+                  AND line_number IS NULL""",
+                (hunt_id, repo, file_path, rule_id),
+            ).fetchone()
+            if existing:
+                self._conn.execute(
+                    """UPDATE secrets SET
+                        secret_type = ?,
+                        match_preview = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE match_preview
+                        END,
+                        commit_sha = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE commit_sha
+                        END,
+                        author = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE author
+                        END,
+                        date = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE date
+                        END,
+                        entropy = COALESCE(?, entropy),
+                        sources = (
+                            SELECT json_group_array(DISTINCT value) FROM (
+                                SELECT value FROM json_each(secrets.sources)
+                                UNION ALL
+                                SELECT ?
+                            ) WHERE value != '' AND value IS NOT NULL
+                        )
+                    WHERE id = ?""",
+                    (
+                        secret_type,
+                        match_preview,
+                        match_preview,
+                        commit_sha,
+                        commit_sha,
+                        author,
+                        author,
+                        date,
+                        date,
+                        entropy,
+                        source,
+                        existing["id"],
+                    ),
+                )
+            else:
+                self._conn.execute(
+                    """INSERT INTO secrets
+                        (hunt_id, rule_id, secret_type, file_path, repo,
+                         line_number, match_preview, commit_sha, author, date,
+                         entropy, sources, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        hunt_id,
+                        rule_id,
+                        secret_type,
+                        file_path,
+                        repo,
+                        None,
+                        match_preview,
+                        commit_sha,
+                        author,
+                        date,
+                        entropy,
+                        sources_json,
+                        now,
+                    ),
+                )
+        else:
+            self._conn.execute(
+                """INSERT INTO secrets
+                    (hunt_id, rule_id, secret_type, file_path, repo,
+                     line_number, match_preview, commit_sha, author, date,
+                     entropy, sources, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hunt_id, repo, file_path, rule_id, line_number) DO UPDATE SET
+                    secret_type = excluded.secret_type,
+                    match_preview = CASE
+                        WHEN excluded.match_preview != '' THEN excluded.match_preview
+                        ELSE secrets.match_preview
+                    END,
+                    commit_sha = CASE
+                        WHEN excluded.commit_sha != '' THEN excluded.commit_sha
+                        ELSE secrets.commit_sha
+                    END,
+                    author = CASE
+                        WHEN excluded.author != '' THEN excluded.author
+                        ELSE secrets.author
+                    END,
+                    date = CASE
+                        WHEN excluded.date != '' THEN excluded.date
+                        ELSE secrets.date
+                    END,
+                    entropy = COALESCE(excluded.entropy, secrets.entropy),
+                    sources = (
+                        SELECT json_group_array(DISTINCT value) FROM (
+                            SELECT value FROM json_each(secrets.sources)
+                            UNION ALL
+                            SELECT ?
+                        ) WHERE value != '' AND value IS NOT NULL
+                    )""",
+                (
+                    hunt_id,
+                    rule_id,
+                    secret_type,
+                    file_path,
+                    repo,
+                    line_number,
+                    match_preview,
+                    commit_sha,
+                    author,
+                    date,
+                    entropy,
+                    sources_json,
+                    now,
+                    source,
+                ),
+            )
+        self._maybe_commit()
+
+    def upsert_api_endpoint(self, hunt_id: str, record: dict[str, Any], source: str = "") -> None:
+        now = _now()
+        sources_json = json.dumps([source]) if source else "[]"
+        self._conn.execute(
+            """INSERT INTO api_endpoints
+                (hunt_id, url, method, status_code, content_type, content_length,
+                 host, path, framework, sources, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hunt_id, url, method) DO UPDATE SET
+                status_code = COALESCE(excluded.status_code, api_endpoints.status_code),
+                content_type = CASE
+                    WHEN excluded.content_type != '' THEN excluded.content_type
+                    ELSE api_endpoints.content_type
+                END,
+                content_length = COALESCE(excluded.content_length, api_endpoints.content_length),
+                framework = CASE
+                    WHEN excluded.framework != '' THEN excluded.framework
+                    ELSE api_endpoints.framework
+                END,
+                sources = (
+                    SELECT json_group_array(DISTINCT value) FROM (
+                        SELECT value FROM json_each(api_endpoints.sources)
+                        UNION ALL
+                        SELECT ?
+                    ) WHERE value != '' AND value IS NOT NULL
+                ),
+                updated_at = excluded.updated_at""",
+            (
+                hunt_id,
+                record.get("url", ""),
+                (record.get("method") or "GET").upper(),
+                record.get("status_code"),
+                record.get("content_type", ""),
+                record.get("content_length"),
+                record.get("host", ""),
+                record.get("path", ""),
+                record.get("framework", ""),
+                sources_json,
+                now,
+                now,
+                source,
+            ),
+        )
+        self._maybe_commit()
+
     def upsert_records(
         self, hunt_id: str, table: str, records: list[dict[str, Any]], source: str = ""
     ) -> None:
@@ -907,6 +1133,10 @@ class HuntContext:
             ),
             "directory": lambda r: self.upsert_directory(hunt_id, r),
             "parameter": lambda r: self.upsert_parameter(hunt_id, r, source or r.get("source", "")),
+            "secret": lambda r: self.upsert_secret(hunt_id, r, source or r.get("source", "")),
+            "api_endpoint": lambda r: self.upsert_api_endpoint(
+                hunt_id, r, source or r.get("source", "")
+            ),
         }
         fn = dispatch.get(table)
         if not fn:
@@ -1016,6 +1246,44 @@ class HuntContext:
         rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_secrets(
+        self,
+        hunt_id: str,
+        secret_type: str | None = None,
+        repo: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
+        sql = "SELECT * FROM secrets WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if secret_type:
+            sql += " AND secret_type = ?"
+            params.append(secret_type)
+        if repo:
+            sql += " AND repo = ?"
+            params.append(repo)
+        sql += " ORDER BY rule_id, file_path"
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_api_endpoints(
+        self,
+        hunt_id: str,
+        host: str | None = None,
+        method: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self._ensure_hunt(hunt_id)
+        sql = "SELECT * FROM api_endpoints WHERE hunt_id = ?"
+        params: list[Any] = [hunt_id]
+        if host:
+            sql += " AND host = ?"
+            params.append(host)
+        if method:
+            sql += " AND method = ?"
+            params.append(method.upper())
+        sql += " ORDER BY host, path, method"
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
     def get_tool_runs(self, hunt_id: str) -> list[dict[str, Any]]:
         self._ensure_hunt(hunt_id)
         rows = self._conn.execute(
@@ -1064,6 +1332,8 @@ class HuntContext:
             "technologies",
             "directories",
             "parameters",
+            "secrets",
+            "api_endpoints",
             "http_history",
             "sessions",
             "findings",

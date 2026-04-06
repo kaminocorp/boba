@@ -157,6 +157,75 @@ class TestParameters:
         assert any(r["tool_name"] == "arjun" for r in runs)
 
 
+class TestApi:
+    async def test_api_persists_results(self, manager, sample_hunt):
+        records = [
+            {
+                "url": "https://api.example.com/api/v2/users",
+                "method": "GET",
+                "status_code": 200,
+                "content_type": "application/json",
+                "content_length": 4521,
+                "host": "api.example.com",
+                "path": "/api/v2/users",
+                "framework": "",
+            },
+            {
+                "url": "https://api.example.com/api/v2/transfer",
+                "method": "POST",
+                "status_code": 201,
+                "content_type": "application/json",
+                "content_length": 128,
+                "host": "api.example.com",
+                "path": "/api/v2/transfer",
+                "framework": "",
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("kiterunner", records))
+
+        with patch("boba.tools.enum.KiterunnerAdapter.run", mock_run):
+            result = await enum.api(
+                manager.context,
+                sample_hunt,
+                url="https://api.example.com",
+            )
+
+        assert len(result.records) == 2
+        saved = manager.context.get_api_endpoints(sample_hunt.id)
+        assert len(saved) == 2
+        methods = {ep["method"] for ep in saved}
+        assert "GET" in methods
+        assert "POST" in methods
+
+    async def test_api_empty_targets(self, manager, sample_hunt):
+        result = await enum.api(manager.context, sample_hunt, targets=[])
+        assert result.records == []
+        assert result.tool_name == "kiterunner"
+        assert result.duration_seconds == 0.0
+
+    async def test_api_tool_run_logged(self, manager, sample_hunt):
+        records = [
+            {
+                "url": "https://api.example.com/api/v1/sessions",
+                "method": "DELETE",
+                "status_code": 204,
+                "host": "api.example.com",
+                "path": "/api/v1/sessions",
+            },
+        ]
+        mock_run = AsyncMock(return_value=_make_result("kiterunner", records))
+
+        with patch("boba.tools.enum.KiterunnerAdapter.run", mock_run):
+            await enum.api(
+                manager.context,
+                sample_hunt,
+                url="https://api.example.com",
+            )
+
+        runs = manager.context.get_tool_runs(sample_hunt.id)
+        assert any(r["tool_name"] == "kiterunner" for r in runs)
+
+
 class TestCrawl:
     async def test_crawl_persists_results(self, manager, sample_hunt):
         records = [
