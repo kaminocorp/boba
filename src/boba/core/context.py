@@ -1292,6 +1292,7 @@ class HuntContext:
         return [dict(r) for r in rows]
 
     def log_tool_run(self, hunt_id: str, result: ToolResult) -> int:
+        self._ensure_hunt(hunt_id)
         finished_at = _now()
         # Compute started_at from finished time minus duration for accurate audit trails
         try:

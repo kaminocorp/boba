@@ -9,6 +9,24 @@ from boba.adapters.base import BaseAdapter
 from boba.core.models import AdapterConfig, OutputFormat
 
 
+def _coerce_list(value: Any) -> list:
+    """Coerce a value to a list: lists pass through, strings wrap, anything else becomes []."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _coerce_tags(value: Any) -> list[str]:
+    """Coerce Nuclei tags field (list or comma-separated string) to a list of strings."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
+
 class NucleiAdapter(BaseAdapter):
     """Wraps Nuclei for template-based vulnerability scanning."""
 
@@ -75,8 +93,8 @@ class NucleiAdapter(BaseAdapter):
             "extracted_results": raw.get("extracted-results") if isinstance(raw.get("extracted-results"), list) else [],
             "curl_command": raw.get("curl-command", ""),
             "description": info.get("description", ""),
-            "reference": info.get("reference") if isinstance(info.get("reference"), list) else [],
-            "tags": info.get("tags") if isinstance(info.get("tags"), list) else [t.strip() for t in info.get("tags", "").split(",") if t.strip()] if isinstance(info.get("tags"), str) else [],
+            "reference": _coerce_list(info.get("reference")),
+            "tags": _coerce_tags(info.get("tags")),
             "matcher_name": raw.get("matcher-name", ""),
         }
 

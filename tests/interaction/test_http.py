@@ -265,16 +265,16 @@ class TestFuzzCombinations:
         assert "BATTERING_RAM" in caplog.text
         assert "param2" in caplog.text
 
-    def test_pitchfork_missing_payloads(self, client, caplog):
-        """PITCHFORK with a position missing payloads should warn, not silently return []."""
-        combos = client._generate_combinations(
-            positions=["p1", "p2", "p3"],
-            payloads={"p1": ["a"], "p2": ["b"]},
-            attack_type=FuzzAttackType.PITCHFORK,
-        )
-        assert combos == []
-        assert "PITCHFORK" in caplog.text
-        assert "p3" in caplog.text
+    def test_pitchfork_missing_payloads(self, client):
+        """PITCHFORK with a position missing payloads should raise ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="p3"):
+            client._generate_combinations(
+                positions=["p1", "p2", "p3"],
+                payloads={"p1": ["a"], "p2": ["b"]},
+                attack_type=FuzzAttackType.PITCHFORK,
+            )
 
     def test_cluster_bomb(self, client):
         combos = client._generate_combinations(

@@ -58,7 +58,7 @@ class HttpxRunnerAdapter(BaseAdapter):
         return {
             "host": raw.get("input", ""),
             "ip": ip,
-            "port": _safe_int(raw.get("port")) or 0,
+            "port": _safe_int(raw.get("port")),
             "scheme": raw.get("scheme", ""),
             "url": raw.get("url", ""),
             "status_code": _safe_int(raw.get("status_code")),

@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.5.8](#058--code-quality-audit--correctness-fixes) — 4 correctness fixes from production-readiness audit: `log_tool_run` missing hunt guard, PITCHFORK silent empty fuzz, nuclei string-reference drop, httpx port sentinel. 0 regressions (709 tests)
 - [0.5.7](#057--v4-enrichment-prod-readiness-fixes) — 8 production-readiness fixes across gitleaks target handling, method-aware prioritization, AI conversation detection, secret dedupe, and IDOR WAF signaling. 10 new tests, 0 regressions (709 tests)
 - [0.5.6](#056--v4-phase-6-ai-multi-turn-conversation) — `test_ai_conversation()` for POST/JSON chatbot testing. Multi-turn escalation, tool abuse, indirect injection, credential leak detection. 1 function, ~11 new tests, 0 regressions (699 tests)
 - [0.5.5](#055--v4-phase-5-api-surface-mapping) — Kiterunner adapter discovers REST endpoints invisible to crawlers. `api_endpoints` table, prioritization integration, CLI commands. 1 adapter, 1 table, ~30 new tests, 0 regressions (688 tests)
@@ -44,6 +45,57 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.8 — Code Quality Audit & Correctness Fixes
+
+**Date:** 2026-04-06  
+**Scope:** 4 targeted correctness fixes identified during a post-V4 production-readiness audit. No new features. 0 regressions (709 tests pass).
+
+A full audit of the V4 codebase surfaced four bugs where the implementation diverged from the intended contract: a missing hunt-existence guard on `log_tool_run` (the only write method without one), PITCHFORK fuzzing silently producing zero results instead of surfacing a misconfiguration error, Nuclei's `reference` field being dropped when the upstream API returns a bare string rather than an array, and httpx's port field using `0` as a sentinel for "not present" when `None` is the correct type. Tests for the changed behaviours were updated to assert the corrected contracts.
+
+### MEDIUM — `log_tool_run` now validates hunt existence before writing
+
+> `src/boba/core/context.py`
+
+Every other write method in `HuntContext` calls `self._ensure_hunt(hunt_id)` before executing its INSERT or UPSERT. `log_tool_run` was the sole exception: a bad `hunt_id` would produce an `IntegrityError` from the FK constraint rather than the cleaner, documented `HuntNotFoundError`. Added the guard for consistency with the rest of the persistence layer.
+
+**Before:** FK `IntegrityError` on invalid `hunt_id`.  
+**After:** `HuntNotFoundError` with a clear message, matching all other write paths.
+
+---
+
+### MEDIUM — PITCHFORK fuzz misconfiguration now raises `ValueError`
+
+> `src/boba/interaction/http.py`
+
+PITCHFORK attack mode pairs payload positions by index: every position must have a payload list for `zip` to produce any combinations. Previously, a missing position caused `zip(*payload_lists)` to return `[]` — the fuzz run would complete with zero requests and only a `logger.warning` as evidence. Callers had no way to distinguish "no vulnerabilities found" from "fuzz never ran". Changed to raise `ValueError` with the list of missing positions so the misconfiguration surfaces immediately.
+
+**Before:** Silent empty result with a debug-level warning.  
+**After:** `ValueError: PITCHFORK requires payloads for all positions; missing: [...]`
+
+---
+
+### LOW — Nuclei `reference` field preserves bare-string values
+
+> `src/boba/adapters/nuclei.py`
+
+The Nuclei JSON schema allows `info.reference` to be either a list of strings or a single string. The previous coercion (`value if isinstance(value, list) else []`) silently dropped single-string references. Extracted `_coerce_list` and `_coerce_tags` helpers: lists pass through unchanged, bare strings are wrapped in a single-element list, and anything else (null, dict) becomes `[]`. The `tags` field received the same treatment (was a one-liner; now a named function for clarity).
+
+**Before:** `reference: "https://cve.mitre.org/..."` → `[]`.  
+**After:** `reference: "https://cve.mitre.org/..."` → `["https://cve.mitre.org/..."]`.
+
+---
+
+### LOW — httpx `port` field uses `None` for absent port, not `0`
+
+> `src/boba/adapters/httpx_runner.py`
+
+Port `0` is a reserved port number (OS-assigned ephemeral); using it as a sentinel for "httpx did not report a port" is semantically wrong and can cause downstream consumers to treat it as a real port. Changed to return `None` when the field is absent, consistent with `status_code` and `content_length` on the same record. Naabu (a dedicated port scanner) retains `or 0` as its default since it always scans for a port.
+
+**Before:** Missing port field → `"port": 0`.  
+**After:** Missing port field → `"port": None`.
 
 ---
 

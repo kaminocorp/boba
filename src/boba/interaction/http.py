@@ -398,12 +398,11 @@ class HttpClient:
             return [{pos: p for pos in positions} for p in all_payloads]
 
         elif attack_type == FuzzAttackType.PITCHFORK:
-            # Positions paired by index
+            # Positions paired by index — all positions must have payloads
             missing = [p for p in positions if not payloads.get(p)]
             if missing:
-                logger.warning(
-                    "PITCHFORK: no payloads for positions %s — 0 combinations generated",
-                    missing,
+                raise ValueError(
+                    f"PITCHFORK requires payloads for all positions; missing: {missing}"
                 )
             payload_lists = [payloads.get(pos, []) for pos in positions]
             return [dict(zip(positions, vals)) for vals in zip(*payload_lists)]
