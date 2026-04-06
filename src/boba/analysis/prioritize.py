@@ -130,8 +130,7 @@ def prioritize_endpoints(
                 suggested.append("mass_assign")
 
         # Signal: Kiterunner-discovered API endpoint
-        ep_lookup = (ep["method"].upper(), url)
-        if ep_lookup in api_endpoint_keys:
+        if endpoint_key in api_endpoint_keys:
             score += 3.0
             reasons.append("Kiterunner-discovered API endpoint")
             if "idor" not in suggested:

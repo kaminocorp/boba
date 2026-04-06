@@ -193,7 +193,13 @@ class TestRedact:
         assert _redact("12345678") == "****"
 
     def test_redact_9_chars(self):
-        assert _redact("123456789") == "1234****6789"
+        assert _redact("123456789") == "****"
+
+    def test_redact_16_chars(self):
+        assert _redact("1234567890123456") == "****"
+
+    def test_redact_17_chars(self):
+        assert _redact("12345678901234567") == "1234****4567"
 
 
 class TestClassifySecretType:

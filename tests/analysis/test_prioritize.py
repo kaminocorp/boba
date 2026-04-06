@@ -364,3 +364,15 @@ class TestApiEndpointPrioritization:
         matches = [r for r in results if r["url"] == "https://app.example.com/api/v2/users"]
         assert len(matches) == 1
         assert matches[0]["method"] == "POST"
+
+    def test_kiterunner_boost_uses_normalized_key(self, context, hunt_id):
+        """Kiterunner score boost must use the normalized endpoint key, not raw URL."""
+        _add_api_endpoint(
+            context, hunt_id, "https://app.example.com/api/v2/users", "GET"
+        )
+
+        results = prioritize_endpoints(context, hunt_id)
+
+        ep = results[0]
+        assert "Kiterunner-discovered API endpoint" in ep["reasons"]
+        assert ep["priority_score"] >= 3.0

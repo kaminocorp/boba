@@ -413,6 +413,60 @@ class TestApiEndpointUpsert:
         assert endpoints[0]["content_type"] == "application/json"  # preserved
         assert endpoints[0]["framework"] == "express"  # preserved
 
+    def test_coalesce_host_path_on_re_upsert(self, context, sample_hunt):
+        context.upsert_api_endpoint(
+            sample_hunt.id,
+            {
+                "url": "https://api.example.com/api/v2/users",
+                "method": "GET",
+                "host": "",
+                "path": "",
+            },
+            source="kiterunner",
+        )
+        # Re-upsert with proper host/path — should update
+        context.upsert_api_endpoint(
+            sample_hunt.id,
+            {
+                "url": "https://api.example.com/api/v2/users",
+                "method": "GET",
+                "host": "api.example.com",
+                "path": "/api/v2/users",
+            },
+            source="manual",
+        )
+        endpoints = context.get_api_endpoints(sample_hunt.id)
+        assert len(endpoints) == 1
+        assert endpoints[0]["host"] == "api.example.com"
+        assert endpoints[0]["path"] == "/api/v2/users"
+
+    def test_coalesce_host_path_preserves_existing(self, context, sample_hunt):
+        context.upsert_api_endpoint(
+            sample_hunt.id,
+            {
+                "url": "https://api.example.com/api/v2/users",
+                "method": "GET",
+                "host": "api.example.com",
+                "path": "/api/v2/users",
+            },
+            source="kiterunner",
+        )
+        # Re-upsert with empty host/path — should preserve existing
+        context.upsert_api_endpoint(
+            sample_hunt.id,
+            {
+                "url": "https://api.example.com/api/v2/users",
+                "method": "GET",
+                "host": "",
+                "path": "",
+            },
+            source="manual",
+        )
+        endpoints = context.get_api_endpoints(sample_hunt.id)
+        assert len(endpoints) == 1
+        assert endpoints[0]["host"] == "api.example.com"
+        assert endpoints[0]["path"] == "/api/v2/users"
+
     def test_stats_include_api_endpoints(self, context, sample_hunt):
         context.upsert_api_endpoint(
             sample_hunt.id,

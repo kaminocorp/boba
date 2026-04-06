@@ -1087,6 +1087,14 @@ class HuntContext:
                     ELSE api_endpoints.content_type
                 END,
                 content_length = COALESCE(excluded.content_length, api_endpoints.content_length),
+                host = CASE
+                    WHEN excluded.host != '' THEN excluded.host
+                    ELSE api_endpoints.host
+                END,
+                path = CASE
+                    WHEN excluded.path != '' THEN excluded.path
+                    ELSE api_endpoints.path
+                END,
                 framework = CASE
                     WHEN excluded.framework != '' THEN excluded.framework
                     ELSE api_endpoints.framework

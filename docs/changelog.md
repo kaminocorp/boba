@@ -1,5 +1,6 @@
 # Changelog
 
+- [0.5.9](#059--post-audit-correctness-fixes) — 3 correctness fixes from independent multi-agent audit: Kiterunner boost raw-URL lookup, `upsert_api_endpoint` silent host/path drop, `_redact` threshold. 5 new tests, 0 regressions (709 tests)
 - [0.5.8](#058--code-quality-audit--correctness-fixes) — 4 correctness fixes from production-readiness audit: `log_tool_run` missing hunt guard, PITCHFORK silent empty fuzz, nuclei string-reference drop, httpx port sentinel. 0 regressions (709 tests)
 - [0.5.7](#057--v4-enrichment-prod-readiness-fixes) — 8 production-readiness fixes across gitleaks target handling, method-aware prioritization, AI conversation detection, secret dedupe, and IDOR WAF signaling. 10 new tests, 0 regressions (709 tests)
 - [0.5.6](#056--v4-phase-6-ai-multi-turn-conversation) — `test_ai_conversation()` for POST/JSON chatbot testing. Multi-turn escalation, tool abuse, indirect injection, credential leak detection. 1 function, ~11 new tests, 0 regressions (699 tests)
@@ -45,6 +46,46 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.9 — Post-Audit Correctness Fixes
+
+**Date:** 2026-04-06  
+**Scope:** 3 targeted correctness fixes identified by an independent multi-agent audit of the V4 codebase. No new features. 5 new tests, 0 regressions (709 tests pass).
+
+A four-agent audit of the shipped V4 code identified three latent bugs: the Kiterunner priority boost performing a normalized-key set lookup with a raw URL (silently no-ops when Kiterunner URLs happen to carry query params), `upsert_api_endpoint` dropping `host`/`path` on conflict (unlike every other metadata field in the same upsert), and `_redact` fully hiding only secrets of ≤ 8 characters — meaning common 9–12 character passwords exposed 67–89% of their content.
+
+### MEDIUM — Kiterunner priority boost uses normalized endpoint key
+
+> `src/boba/analysis/prioritize.py`
+
+`api_endpoint_keys` is built by passing each Kiterunner URL through `_endpoint_key()`, which strips query string and fragment and returns a `(method, normalized_url)` tuple. The lookup inside the scoring loop was using the raw URL dict value instead of the loop's `endpoint_key` variable, which is already the normalized key. The two agreed today because Kiterunner URLs never carry query params, but the bug would silently suppress the +3.0 boost the moment any such URL appeared.
+
+**Before:** `ep_lookup = (ep["method"].upper(), url); if ep_lookup in api_endpoint_keys:`  
+**After:** `if endpoint_key in api_endpoint_keys:` — uses the variable already holding the normalized key.
+
+---
+
+### MEDIUM — `upsert_api_endpoint` now enriches `host` and `path` on conflict
+
+> `src/boba/core/context.py`
+
+The `ON CONFLICT DO UPDATE SET` clause updated `status_code`, `content_type`, `content_length`, `framework`, `sources`, and `updated_at` — but left `host` and `path` out. A sparse first insert (e.g., from a tool that omits those fields) would permanently lock them as empty strings, since subsequent upserts with populated values had no update path. Added the same `CASE WHEN excluded.X != '' THEN excluded.X ELSE api_endpoints.X END` pattern already used for `content_type` and `framework`. Two new tests cover both directions: empty → populated updates, and populated → empty preserves.
+
+**Before:** `host`/`path` omitted from `DO UPDATE SET`; first-write value was permanent.  
+**After:** Both fields enrich on conflict, consistent with all other metadata columns.
+
+---
+
+### LOW — `_redact` full-redaction threshold raised from 8 to 16 characters
+
+> `src/boba/adapters/gitleaks.py`
+
+The previous threshold (`<= 8`) left common password lengths (9–12 chars) partially revealed: a 9-character secret produced `Xxxx****Zzzz`, exposing 8 of 9 characters and making brute-force trivial. Raised the threshold to `<= 16` so all typical passwords are fully replaced with `****`. Secrets longer than 16 characters (API keys, tokens) continue to show the first and last 4 characters to aid identification. The docstring was also corrected — the previous wording claimed "at most 25% revealed", which was inaccurate for 17–31 character secrets. Three new tests assert the boundary behaviour at 9, 16, and 17 characters.
+
+**Before:** `len(value) <= 8` → full redact; 9-char `P@ssw0rd!` → `P@ss****0rd!`.  
+**After:** `len(value) <= 16` → full redact; 9-char `P@ssw0rd!` → `****`.
 
 ---
 

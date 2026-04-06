@@ -70,8 +70,13 @@ def _classify_secret_type(rule_id: str) -> str:
 
 
 def _redact(value: str) -> str:
-    """Redact a secret to first 4 + last 4 characters."""
-    if len(value) <= 8:
+    """Redact a secret value for safe storage.
+
+    Secrets of 16 characters or fewer are fully replaced with ``****``.
+    Longer secrets (API keys, tokens) show the first and last 4 characters
+    to aid identification while hiding the bulk of the value.
+    """
+    if len(value) <= 16:
         return "****"
     return f"{value[:4]}****{value[-4:]}"
 
