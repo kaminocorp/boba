@@ -1,5 +1,7 @@
 # Changelog
 
+- [0.7.1](#071--mcp-server-hardening) — 8 defensive fixes across MCP server: `raw_stderr` None crash, port env-var guard, SSRF injection-point falsy check, OOB/shutdown exception narrowing, browser session-not-found error, platform validation, enum reconstruction safety. 0 new tests, 0 regressions (840 tests)
+- [0.7.0](#070--mcp-server) — MCP server exposing all 65 Boba tools as native MCP tool calls. FastMCP, STDIO + streamable-http transports, resource lifecycle management. 0 library changes, 117 new tests, 0 regressions (839 tests)
 - [0.6.3](#063--context-module-split) — `context.py` (2,204 lines) → `context/` package (14 files, 2,399 lines). Mixin-based split: 11 mixins, 70 methods, zero behaviour change. 0 new tests, 0 regressions (722 tests)
 - [0.6.2](#062--correctness-fixes-scoring-coverage-chaining-temp-files) — 5 correctness fixes: CVSS cloud metadata (confidentiality+integrity), coverage host filter gate, cross-host chaining ordering, temp file leaks (ffuf/arjun), dead code (test_xss/test_sqli). 0 new tests, 0 regressions (722 tests)
 - [0.6.1](#061--bug-fixes-race-test-type--json-import) — 2 bugs in vuln.py: `test_race` inconsistent type on total failure (dedup key), `_bodies_similar` shadowed json import (hot path overhead). 0 new tests, 0 regressions (722 tests)
@@ -51,6 +53,99 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.7.1 — MCP Server Hardening
+
+**Date:** 2026-04-06
+**Scope:** 8 defensive fixes across the MCP server layer. 3 crash bugs, 3 silent-failure fixes, 2 robustness improvements. 0 new tests, 0 regressions (840 tests).
+
+### Crash bugs fixed
+
+1. **`serializers.py` — `raw_stderr` None crash:** `result.raw_stderr[:500]` crashes with `TypeError` when stderr is `None` (e.g., tool binary not found, segfault). Fixed: `(result.raw_stderr or "")[:500]`.
+
+2. **`__init__.py` — port env-var crash:** `int(os.environ.get("BOBA_MCP_PORT", "3000"))` crashes with `ValueError` on non-numeric input. Fixed: try/except fallback to default 3000.
+
+3. **`tools_vuln.py` — SSRF injection-point falsy check:** `if param` treats empty string `""` as no param, skipping injection point setup. Fixed: `if param is not None`.
+
+### Silent-failure fixes
+
+4. **`tools_interaction.py` / `tools_vuln.py` — OOB start exception narrowing:** Bare `except Exception: pass` on `oob.start()` masked real errors (permission denied, network failure) behind "already started" assumption. Fixed: catch only `RuntimeError`.
+
+5. **`tools_interaction.py` — browser session-not-found:** `browser_navigate` silently skipped auth when session name didn't resolve, proceeding unauthenticated with no signal. Fixed: raises `ValueError` with clear message.
+
+6. **`tools_reporting.py` — platform validation:** Invalid platform string (e.g., `"jira"`) silently fell back to markdown format. Fixed: raises `ValueError` listing valid platforms.
+
+### Robustness improvements
+
+7. **`resources.py` — shutdown logging:** Replaced bare `except Exception: pass` in shutdown with `logger.debug(…, exc_info=True)` on all 3 resource teardown paths (HTTP clients, browser, OOB managers). Operators can now diagnose resource leaks.
+
+8. **`tools_reporting.py` — enum reconstruction safety:** `Severity()`, `Platform()`, `ReportStatus()` construction from DB row values now uses try/except with safe defaults instead of crashing on invalid values.
+
+### Modified files
+
+- `src/boba/mcp/__init__.py` — port parsing guard
+- `src/boba/mcp/resources.py` — logging import, shutdown exception logging
+- `src/boba/mcp/serializers.py` — None-safe stderr slicing
+- `src/boba/mcp/tools_interaction.py` — OOB exception narrowing, session-not-found error, session merge clarity
+- `src/boba/mcp/tools_vuln.py` — injection-point `is not None` check, OOB exception narrowing
+- `src/boba/mcp/tools_reporting.py` — platform validation, safe enum reconstruction
+
+---
+
+## 0.7.0 — MCP Server
+
+**Date:** 2026-04-06
+**Scope:** MCP (Model Context Protocol) server exposing all 65 Boba tools as native MCP tool calls. Zero modifications to existing library code. 117 new tests, 0 regressions (839 total, up from 722).
+
+### What
+
+A FastMCP server (`src/boba/mcp/`) that wraps every Boba library function as a typed MCP tool. Agents call `recon_subdomains(hunt_id, domains=["example.com"])` instead of `boba recon subdomains $HUNT -d example.com -f json`. Supports STDIO (local agents) and streamable-http (remote agents) transports.
+
+### Tools (65)
+
+| Category | Count |
+|---|---|
+| Hunt management | 6 |
+| Reconnaissance | 5 |
+| Enumeration | 2 |
+| Scanning | 1 |
+| Context queries | 11 |
+| Session management | 7 |
+| HTTP client | 4 |
+| Browser | 3 |
+| OOB listeners | 3 |
+| Vulnerability testing | 12 |
+| Analysis | 6 |
+| Reporting | 5 |
+
+### Architecture
+
+```
+CLI (Typer) ──► Boba Library (tools, context, adapters)
+MCP Server  ──► Boba Library (tools, context, adapters)
+```
+
+Both are thin wrappers calling the same async library functions. The MCP server adds stateful resource management — HTTP clients, browser, sessions, and OOB listeners persist across tool calls within a session.
+
+### New files
+
+- `src/boba/mcp/` — 10 modules: `__init__.py`, `server.py`, `resources.py`, `serializers.py`, `tools_hunt.py`, `tools_recon.py`, `tools_enum.py`, `tools_scan.py`, `tools_context.py`, `tools_interaction.py`, `tools_vuln.py`, `tools_analysis.py`, `tools_reporting.py`
+- `tests/mcp/` — 12 test modules, 117 tests
+- `docs/mcp-setup.md` — Agent configuration guide
+
+### Modified files
+
+- `pyproject.toml` — `mcp` optional dep, `boba-mcp` entry point
+- `agent-orientation.md` — MCP access section
+
+### Install
+
+```bash
+pip install boba[mcp]   # or pip install -e ".[dev]"
+boba-mcp                # start STDIO server
+```
 
 ---
 

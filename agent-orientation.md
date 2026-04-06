@@ -482,6 +482,27 @@ Run `boba analyze prioritize $HUNT --top 20` to get a ranked list. Then:
 
 ---
 
+## MCP Access (Alternative to CLI)
+
+Boba also exposes all 65 tools as an MCP (Model Context Protocol) server. If you're connected via MCP, you call tools directly instead of running shell commands — no subprocess overhead, no JSON parsing, typed parameters.
+
+**How to use:** Instead of `boba recon subdomains $HUNT -d example.com -f json`, call:
+```
+recon_subdomains(hunt_id="abc123", domains=["example.com"])
+```
+
+The MCP server returns structured JSON responses. All tools follow the same workflow as the CLI — the difference is the transport layer.
+
+**Key differences from CLI:**
+- Tool names use underscores instead of spaces (`recon_subdomains` not `recon subdomains`)
+- No `-f json` flag needed — responses are always structured
+- Sessions are referenced by name (`session_name="user_a"`) instead of `--session user_a`
+- Recon/enum tools that default to "all known hosts" still do so — just omit the `targets` parameter
+
+See `docs/mcp-setup.md` for full setup and tool reference.
+
+---
+
 ## Key Things to Remember
 
 1. **Every command needs a hunt ID.** Save it after `boba hunt create`.
