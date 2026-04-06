@@ -37,6 +37,7 @@ _ADMIN_RE = re.compile(r"/(admin|manage|internal|superuser)([/?#]|$)", re.IGNORE
 _JSON_STRUCTURAL_RE = re.compile(rb"^\s*[\[\]{},]*\s*$")
 
 _WAF_STATUS_CODES = frozenset({403, 406, 429, 503})
+_AI_CRED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in ai_payloads.CREDENTIAL_PATTERNS]
 _WAF_BODY_SIGNATURES = (
     "blocked",
     "waf",
@@ -351,14 +352,14 @@ async def test_ssrf(
     cookies = session.cookies if session else {}
     vulnerable = False
     confidence = Confidence.POSSIBLE
-    _deadline = asyncio.get_event_loop().time() + max_test_seconds
+    _deadline = asyncio.get_running_loop().time() + max_test_seconds
 
     # Default injection: replace param values in URL
     if not injection_points:
         injection_points = [{"location": "url_param", "name": "url"}]
 
     for point in injection_points:
-        if asyncio.get_event_loop().time() > _deadline:
+        if asyncio.get_running_loop().time() > _deadline:
             logger.warning("test_ssrf timed out after %.0fs on %s", max_test_seconds, url)
             break
         param_name = point.get("name", "url")
@@ -545,10 +546,10 @@ async def test_xss(
     confidence = Confidence.POSSIBLE
 
     test_params = params or {"q": ""}
-    _deadline = asyncio.get_event_loop().time() + max_test_seconds
+    _deadline = asyncio.get_running_loop().time() + max_test_seconds
 
     for param_name in test_params:
-        if asyncio.get_event_loop().time() > _deadline:
+        if asyncio.get_running_loop().time() > _deadline:
             logger.warning("test_xss timed out after %.0fs on %s", max_test_seconds, url)
             break
         for payload in payloads:
@@ -725,10 +726,10 @@ async def test_sqli(
     confidence = Confidence.POSSIBLE
 
     test_params = params or {"id": "1"}
-    _deadline = asyncio.get_event_loop().time() + max_test_seconds
+    _deadline = asyncio.get_running_loop().time() + max_test_seconds
 
     for param_name, default_val in test_params.items():
-        if asyncio.get_event_loop().time() > _deadline:
+        if asyncio.get_running_loop().time() > _deadline:
             logger.warning("test_sqli timed out after %.0fs on %s", max_test_seconds, url)
             break
         # Baseline: request with the normal parameter value, so true/false comparisons
@@ -838,7 +839,7 @@ async def test_sqli(
         # Time-based detection — only if not already confirmed via error/boolean.
         # Uses multiple baseline samples to reduce false positives from network jitter.
         if not vulnerable:
-            if asyncio.get_event_loop().time() > _deadline:
+            if asyncio.get_running_loop().time() > _deadline:
                 logger.warning("test_sqli timed out before time-based phase on %s", url)
                 break
             time_payloads = (
@@ -863,7 +864,7 @@ async def test_sqli(
             baseline_median = sorted(baseline_samples)[len(baseline_samples) // 2]
 
             for payload in time_payloads:
-                if asyncio.get_event_loop().time() > _deadline:
+                if asyncio.get_running_loop().time() > _deadline:
                     logger.warning("test_sqli time-based phase timed out on %s", url)
                     break
                 test_url = _inject_param(url, param_name, f"{default_val}{payload}")
@@ -1814,10 +1815,10 @@ async def test_ai(
     cookies = session.cookies if session else {}
     vulnerable = False
     confidence = Confidence.POSSIBLE
-    _deadline = asyncio.get_event_loop().time() + max_test_seconds
+    _deadline = asyncio.get_running_loop().time() + max_test_seconds
 
     for payload in payloads:
-        if asyncio.get_event_loop().time() > _deadline:
+        if asyncio.get_running_loop().time() > _deadline:
             logger.warning("test_ai timed out after %.0fs on %s", max_test_seconds, url)
             break
         test_url = _inject_param(url, param, payload)
@@ -1937,9 +1938,7 @@ async def test_ai_conversation(
         headers["Content-Type"] = content_type
     vulnerable = False
     confidence = Confidence.POSSIBLE
-    _deadline = asyncio.get_event_loop().time() + max_test_seconds
-
-    _cred_patterns = [re.compile(p, re.IGNORECASE) for p in ai_payloads.CREDENTIAL_PATTERNS]
+    _deadline = asyncio.get_running_loop().time() + max_test_seconds
 
     def _check_response(body_text: str, payload: str, request_id: int) -> bool:
         nonlocal vulnerable, confidence
@@ -1989,7 +1988,7 @@ async def test_ai_conversation(
                 )
                 return True
 
-        for pattern in _cred_patterns:
+        for pattern in _AI_CRED_PATTERNS:
             if pattern.search(body_text):
                 vulnerable = True
                 confidence = Confidence.CONFIRMED
@@ -2008,13 +2007,13 @@ async def test_ai_conversation(
     for conversation in conversations:
         if vulnerable:
             break
-        if asyncio.get_event_loop().time() > _deadline:
+        if asyncio.get_running_loop().time() > _deadline:
             logger.warning("test_ai_conversation timed out on %s", url)
             break
 
         history: list[str] = []
         for turn in conversation:
-            if asyncio.get_event_loop().time() > _deadline:
+            if asyncio.get_running_loop().time() > _deadline:
                 break
 
             body = _json_mod.dumps({message_field: turn, history_field: history})
@@ -2037,7 +2036,7 @@ async def test_ai_conversation(
     # Mode 2: Tool abuse (single-turn POST)
     if not vulnerable:
         for payload in tool_payloads:
-            if asyncio.get_event_loop().time() > _deadline:
+            if asyncio.get_running_loop().time() > _deadline:
                 break
 
             body = _json_mod.dumps({message_field: payload})
@@ -2059,7 +2058,7 @@ async def test_ai_conversation(
     # Mode 3: Indirect injection (single-turn POST)
     if not vulnerable:
         for payload in indirect_payloads:
-            if asyncio.get_event_loop().time() > _deadline:
+            if asyncio.get_running_loop().time() > _deadline:
                 break
 
             body = _json_mod.dumps({message_field: payload})

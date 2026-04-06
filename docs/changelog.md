@@ -1,6 +1,7 @@
 # Changelog
 
-- [0.5.9](#059--post-audit-correctness-fixes) — 3 correctness fixes from independent multi-agent audit: Kiterunner boost raw-URL lookup, `upsert_api_endpoint` silent host/path drop, `_redact` threshold. 5 new tests, 0 regressions (709 tests)
+- [0.5.10](#0510--python-312-deprecation-fixes) — `asyncio.get_running_loop()` across all 15 deadline call sites in vuln.py, module-level credential pattern compilation. 0 new tests, 0 regressions (714 tests)
+- [0.5.9](#059--post-audit-correctness-fixes) — 3 correctness fixes from independent multi-agent audit: Kiterunner boost raw-URL lookup, `upsert_api_endpoint` silent host/path drop, `_redact` threshold. 5 new tests, 0 regressions (714 tests)
 - [0.5.8](#058--code-quality-audit--correctness-fixes) — 4 correctness fixes from production-readiness audit: `log_tool_run` missing hunt guard, PITCHFORK silent empty fuzz, nuclei string-reference drop, httpx port sentinel. 0 regressions (709 tests)
 - [0.5.7](#057--v4-enrichment-prod-readiness-fixes) — 8 production-readiness fixes across gitleaks target handling, method-aware prioritization, AI conversation detection, secret dedupe, and IDOR WAF signaling. 10 new tests, 0 regressions (709 tests)
 - [0.5.6](#056--v4-phase-6-ai-multi-turn-conversation) — `test_ai_conversation()` for POST/JSON chatbot testing. Multi-turn escalation, tool abuse, indirect injection, credential leak detection. 1 function, ~11 new tests, 0 regressions (699 tests)
@@ -46,6 +47,41 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## 0.5.10 — Python 3.12 Deprecation Fixes
+
+**Date:** 2026-04-06  
+**Scope:** 2 low-severity code quality fixes surfaced during a pre-push production readiness sweep. No behavioural changes. 0 new tests, 0 regressions (714 tests pass).
+
+`asyncio.get_event_loop()` was used throughout `vuln.py` for wall-clock deadline tracking inside async test functions. In Python ≥ 3.10 this call emits a `DeprecationWarning` when made from within a running coroutine; in Python 3.12 the warning became louder and will become an error in a future release. All 15 call sites were updated to `asyncio.get_running_loop()`, which is explicit about requiring a running event loop and carries no deprecation burden. Separately, `test_ai_conversation()` was compiling the four credential-leak regex patterns on every invocation — moved to a module-level constant `_AI_CRED_PATTERNS` alongside the existing module-level `_WAF_STATUS_CODES` and `_WAF_BODY_SIGNATURES`.
+
+### LOW — `asyncio.get_running_loop()` replaces `get_event_loop()` across all deadline call sites
+
+> `src/boba/tools/vuln.py`
+
+Every vuln test function uses a `_deadline = loop.time() + max_test_seconds` pattern to cap total wall-clock time. All 15 usages called `asyncio.get_event_loop().time()`. `get_event_loop()` is deprecated in coroutine context since Python 3.10 because it can silently create a new event loop when none is running — a footgun that masks bugs in test harnesses. `get_running_loop()` raises `RuntimeError` if called outside a running loop, making the requirement explicit and eliminating the warning.
+
+**Before:** `asyncio.get_event_loop().time()` — 15 call sites across `test_ssrf`, `test_xss`, `test_sqli`, `test_ai`, `test_ai_conversation`, and others.  
+**After:** `asyncio.get_running_loop().time()` — same semantics, no deprecation warning, correct behaviour in all supported Python versions (3.11+).
+
+---
+
+### LOW — Credential regex patterns compiled once at module load
+
+> `src/boba/tools/vuln.py`
+
+`test_ai_conversation()` compiled `ai_payloads.CREDENTIAL_PATTERNS` into regex objects on every call:
+
+```python
+_cred_patterns = [re.compile(p, re.IGNORECASE) for p in ai_payloads.CREDENTIAL_PATTERNS]
+```
+
+Python's `re` module maintains an internal LRU cache for compiled patterns, but the cache has a fixed upper bound and can evict entries under load. Promoted to a module-level constant `_AI_CRED_PATTERNS`, consistent with `_WAF_BODY_SIGNATURES` and `_JSON_STRUCTURAL_RE` already at module scope. The inner `_check_response` closure now references `_AI_CRED_PATTERNS` directly.
+
+**Before:** Four patterns recompiled on every `test_ai_conversation()` call.  
+**After:** `_AI_CRED_PATTERNS` compiled once at import time.
 
 ---
 
