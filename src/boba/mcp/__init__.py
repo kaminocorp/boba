@@ -7,7 +7,13 @@ import os
 
 def main() -> None:
     """Entry point for the ``boba-mcp`` command."""
-    from boba.mcp.server import mcp  # noqa: WPS433 — deferred to avoid import-time side-effects
+    try:
+        from boba.mcp.server import mcp  # noqa: WPS433 — deferred to avoid import-time side-effects
+    except ImportError as exc:
+        raise SystemExit(
+            f"boba-mcp requires the 'mcp' optional dependency ({exc}).\n"
+            "Install with: pip install 'boba[mcp]'"
+        ) from exc
 
     transport = os.environ.get("BOBA_MCP_TRANSPORT", "stdio")
     try:

@@ -27,9 +27,16 @@ LLM agents can reason and write — but they have no way to hold an authenticate
 ## Quickstart
 
 ```bash
-pip install -e ".[dev]"
+pip install boba                 # CLI only
+pip install 'boba[mcp]'          # + MCP server (boba-mcp)
+pip install 'boba[oob]'          # + Interactsh OOB listeners
+pip install -e '.[dev]'          # development install
+
+playwright install chromium      # required for browser-based vuln tests
 boba --help
 ```
+
+External binaries (`subfinder`, `httpx`, `nuclei`, `ffuf`, ...) are not Python deps — install whichever tools you need from the [External Tools](#external-tools) table below.
 
 ```bash
 # Create a hunt with scope, run recon
@@ -108,7 +115,7 @@ Boba wraps these — install whichever you need:
 ```bash
 pip install -e ".[dev]"
 
-pytest                          # 592 tests
+pytest                          # 840 tests
 ruff check src/ tests/          # lint
 ruff format --check src/ tests/ # format check
 ```
