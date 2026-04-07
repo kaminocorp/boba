@@ -1,6 +1,6 @@
 # Changelog
 
-- [Unreleased](#unreleased) — in-flight work for 0.8.0
+- [Unreleased](#unreleased) — post-0.7.1 distribution + cleanup pass: pyproject version sync (0.2.9→0.7.1) and dev bump to 0.8.0.dev0, `boba-mcp` friendly missing-extra error, README install block (`[mcp]`/`[oob]`/`[dev]` extras + `playwright install chromium`), roadmap V4→done + MCP/V5 entries, deprecated `typer[all]` extra dropped (warning gone), ruff format drift cleanup across 19 files, `[Unreleased]` changelog scaffolding. 0 new tests, 0 regressions (840 tests)
 - [0.7.1](#071--mcp-server-hardening) — 8 defensive fixes across MCP server: `raw_stderr` None crash, port env-var guard, SSRF injection-point falsy check, OOB/shutdown exception narrowing, browser session-not-found error, platform validation, enum reconstruction safety. 0 new tests, 0 regressions (840 tests)
 - [0.7.0](#070--mcp-server) — MCP server exposing all 65 Boba tools as native MCP tool calls. FastMCP, STDIO + streamable-http transports, resource lifecycle management. 0 library changes, 117 new tests, 0 regressions (839 tests)
 - [0.6.3](#063--context-module-split) — `context.py` (2,204 lines) → `context/` package (14 files, 2,399 lines). Mixin-based split: 11 mixins, 70 methods, zero behaviour change. 0 new tests, 0 regressions (722 tests)
@@ -60,9 +60,48 @@
 ## Unreleased
 
 **Target:** 0.8.0
-**Scope:** TBD. Add entries here as work lands; promote to a numbered release on tag.
+**Scope:** Post-0.7.1 distribution polish and pre-feature cleanup. Sets up the repo so the next entry under this header can be the V5 continuous monitoring loop without dragging release-hygiene debt with it. 0 new tests, 0 regressions (840 tests).
+
+### Distribution
+
+1. **`pyproject.toml` version sync:** `version` was stuck at `0.2.9` while the changelog had marched to `0.7.1` — development had been changelog-driven, not release-driven. Bumped to `0.7.1`, tagged `v0.7.1`, then bumped to `0.8.0.dev0` per PEP 440 so subsequent commits aren't ambiguously labeled as the released version. First real git tag in the project's history.
+
+2. **`boba-mcp` friendly missing-extra error:** the `boba-mcp` console script was registered unconditionally in `pyproject.toml`, but the underlying `mcp` package is gated behind the `[mcp]` optional extra. A user running `pip install boba` (without the extra) followed by `boba-mcp` would hit a raw `ImportError` traceback. Wrapped the deferred `from boba.mcp.server import mcp` in a try/except that raises `SystemExit` with `"boba-mcp requires the 'mcp' optional dependency. Install with: pip install 'boba[mcp]'"`. Verified in a fresh venv: clean error message, no traceback.
+
+3. **README install block:** rewrote the Quickstart to document the four install paths (`pip install boba`, `'boba[mcp]'`, `'boba[oob]'`, `-e '.[dev]'`), added the required `playwright install chromium` bootstrap, and pointed at the External Tools table for the non-Python binaries (`subfinder`, `nuclei`, etc.). The old block only showed the dev install.
+
+### Cleanup
+
+4. **Deprecated `typer[all]` extra dropped:** `typer[all]>=0.9` → `typer>=0.12`. Modern typer (≥0.12) folded `shellingham`/`colorama`/`rich` into the base install and removed the `[all]` extra entirely. The old declaration was producing `WARNING: typer 0.24.1 does not provide the extra 'all'` on every fresh install. Bumped the floor to `0.12` so the fix is unambiguously correct (a weaker `typer>=0.9` would technically be wrong for 0.9–0.11 users). Verified clean install in a throwaway venv: 0 warnings, typer 0.24.1 still resolves.
+
+5. **README roadmap refresh:** V4 was unchecked despite being shipped across 0.5.3–0.6.0 (arjun, kiterunner, gitleaks, multipart upload, AI multi-turn, WAF detection, AI chain rules — fourteen releases of unticked work). Marked V4 done with the actual deliverables, added an MCP server entry for 0.7.0, and added V5 as the explicit "continuous monitoring loop (snapshot diffing, scheduled re-runs, new-asset alerts)" line. The roadmap now matches reality and sets the contract for what 0.8.0 will be.
+
+6. **`pytest # 840 tests` → `pytest # full test suite`:** removed the hardcoded test count from the README dev block. Hardcoded counts are a ratchet — they drift on every release and stale ones look unprofessional. The number was already wrong on the previous release; removing it makes drift impossible.
+
+7. **ruff format drift cleanup:** `ruff format --check` was failing on 19 files (8 src, 11 tests) — pre-existing drift accumulated since the last format pass. Reformatted as a standalone mechanical commit (`647e0c4`) before the release commit so the release diff stays focused on actual changes. Zero behaviour change, 840 tests still passing.
+
+8. **`[Unreleased]` changelog scaffolding:** added an `[Unreleased]` section at the top of the changelog (both index and body) so future work has a place to land before tag time, instead of being reconstructed from `git log` when cutting a release. This entry is the first use of that scaffolding.
+
+### Modified files
+
+- `pyproject.toml` — version, typer dep
+- `README.md` — install block, roadmap, dev block test count
+- `src/boba/mcp/__init__.py` — friendly missing-extra error
+- `docs/changelog.md` — `[Unreleased]` scaffolding (this entry)
+- `docs/executing/0.7.1-release-plan.md` — new release plan doc
+- 19 files reformatted by ruff (no behaviour change)
+
+### Commits
+
+- `647e0c4` — ruff format drift cleanup (19 files)
+- `e8af31c` — release plan in `docs/executing/`
+- `2ffcc69` — **Release 0.7.1** (tagged `v0.7.1`)
+- `9bc4764` — post-release hygiene (`0.8.0.dev0`, `[Unreleased]` scaffolding)
+- `22bde41` — typer extra drop, README roadmap, test-count removal
 
 ---
+
+
 
 ## 0.7.1 — MCP Server Hardening
 
