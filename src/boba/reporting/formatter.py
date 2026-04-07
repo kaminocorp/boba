@@ -132,8 +132,9 @@ def format_markdown(report: ReportDraft) -> str:
 
     lines.append(f"# {report.title}")
     lines.append("")
-    lines.append(f"**Severity:** {report.severity.value.title()} | "
-                 f"**CVSS:** {report.cvss_score:.1f}")
+    lines.append(
+        f"**Severity:** {report.severity.value.title()} | **CVSS:** {report.cvss_score:.1f}"
+    )
     lines.append("")
 
     lines.append("## Summary")

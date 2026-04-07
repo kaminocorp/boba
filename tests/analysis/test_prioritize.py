@@ -367,9 +367,7 @@ class TestApiEndpointPrioritization:
 
     def test_kiterunner_boost_uses_normalized_key(self, context, hunt_id):
         """Kiterunner score boost must use the normalized endpoint key, not raw URL."""
-        _add_api_endpoint(
-            context, hunt_id, "https://app.example.com/api/v2/users", "GET"
-        )
+        _add_api_endpoint(context, hunt_id, "https://app.example.com/api/v2/users", "GET")
 
         results = prioritize_endpoints(context, hunt_id)
 

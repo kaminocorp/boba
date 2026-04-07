@@ -43,9 +43,14 @@ class TestCVSSCalculation:
     def test_max_score_10(self):
         """All-high metrics with scope changed → CVSS 10.0 (Log4Shell-like)."""
         result = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="N", user_interaction="N",
-            scope="C", confidentiality="H", integrity="H", availability="H",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="N",
+            user_interaction="N",
+            scope="C",
+            confidentiality="H",
+            integrity="H",
+            availability="H",
         )
         assert result.score == 10.0
         assert result.severity == Severity.CRITICAL
@@ -54,7 +59,9 @@ class TestCVSSCalculation:
     def test_zero_impact(self):
         """All CIA = None → score 0.0."""
         result = calculate_cvss(
-            confidentiality="N", integrity="N", availability="N",
+            confidentiality="N",
+            integrity="N",
+            availability="N",
         )
         assert result.score == 0.0
         assert result.severity == Severity.INFO
@@ -62,27 +69,42 @@ class TestCVSSCalculation:
     def test_known_vector_cve_2021_44228(self):
         """Log4Shell CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H = 10.0."""
         result = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="N", user_interaction="N",
-            scope="C", confidentiality="H", integrity="H", availability="H",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="N",
+            user_interaction="N",
+            scope="C",
+            confidentiality="H",
+            integrity="H",
+            availability="H",
         )
         assert result.score == 10.0
 
     def test_known_vector_medium(self):
         """CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N = 6.1 (reflected XSS)."""
         result = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="N", user_interaction="R",
-            scope="C", confidentiality="L", integrity="L", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="N",
+            user_interaction="R",
+            scope="C",
+            confidentiality="L",
+            integrity="L",
+            availability="N",
         )
         assert result.score == 6.1
 
     def test_physical_access_low_score(self):
         """Physical attack vector with low impact → low score."""
         result = calculate_cvss(
-            attack_vector="P", attack_complexity="H",
-            privileges_required="H", user_interaction="R",
-            scope="U", confidentiality="L", integrity="N", availability="N",
+            attack_vector="P",
+            attack_complexity="H",
+            privileges_required="H",
+            user_interaction="R",
+            scope="U",
+            confidentiality="L",
+            integrity="N",
+            availability="N",
         )
         assert result.score < 2.0
         assert result.severity == Severity.LOW
@@ -90,23 +112,38 @@ class TestCVSSCalculation:
     def test_scope_unchanged_vs_changed(self):
         """Scope:Changed produces higher score than Scope:Unchanged for same metrics."""
         unchanged = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="L", user_interaction="N",
-            scope="U", confidentiality="H", integrity="N", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="L",
+            user_interaction="N",
+            scope="U",
+            confidentiality="H",
+            integrity="N",
+            availability="N",
         )
         changed = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="L", user_interaction="N",
-            scope="C", confidentiality="H", integrity="N", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="L",
+            user_interaction="N",
+            scope="C",
+            confidentiality="H",
+            integrity="N",
+            availability="N",
         )
         assert changed.score > unchanged.score
 
     def test_vector_string_format(self):
         """Vector string matches CVSS 3.1 format."""
         result = calculate_cvss(
-            attack_vector="N", attack_complexity="L",
-            privileges_required="N", user_interaction="N",
-            scope="U", confidentiality="H", integrity="H", availability="N",
+            attack_vector="N",
+            attack_complexity="L",
+            privileges_required="N",
+            user_interaction="N",
+            scope="U",
+            confidentiality="H",
+            integrity="H",
+            availability="N",
         )
         assert result.vector == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
 
@@ -140,31 +177,39 @@ class TestAutoScoring:
 
     def test_idor_write_higher(self):
         """IDOR with write evidence → integrity:H."""
-        result = auto_score_finding({
-            "finding_type": "idor",
-            "evidence": [{"method": "DELETE", "note": "Deleted resource"}],
-        })
+        result = auto_score_finding(
+            {
+                "finding_type": "idor",
+                "evidence": [{"method": "DELETE", "note": "Deleted resource"}],
+            }
+        )
         assert result.integrity == "H"
 
     def test_ssrf_cloud_metadata(self):
         """SSRF with cloud metadata evidence → critical."""
-        result = auto_score_finding({
-            "finding_type": "ssrf",
-            "evidence": [{"payload": "http://169.254.169.254/latest/meta-data/"}],
-        })
+        result = auto_score_finding(
+            {
+                "finding_type": "ssrf",
+                "evidence": [{"payload": "http://169.254.169.254/latest/meta-data/"}],
+            }
+        )
         assert result.severity == Severity.CRITICAL
         assert result.scope == "C"
 
     def test_xss_reflected_vs_stored(self):
         """Stored XSS scores higher than reflected."""
-        reflected = auto_score_finding({
-            "finding_type": "xss",
-            "evidence": [{"type": "reflected"}],
-        })
-        stored = auto_score_finding({
-            "finding_type": "xss",
-            "evidence": [{"type": "stored"}],
-        })
+        reflected = auto_score_finding(
+            {
+                "finding_type": "xss",
+                "evidence": [{"type": "reflected"}],
+            }
+        )
+        stored = auto_score_finding(
+            {
+                "finding_type": "xss",
+                "evidence": [{"type": "stored"}],
+            }
+        )
         assert stored.score >= reflected.score
 
     def test_sqli_default_critical(self):
@@ -221,8 +266,14 @@ class TestBatchScoring:
     def test_score_all_findings(self, context, hunt_id):
         """score_findings scores all findings in a hunt."""
         _insert_finding(context, hunt_id, finding_type="idor", title="IDOR 1")
-        _insert_finding(context, hunt_id, finding_type="xss", title="XSS 1",
-                        url="https://app.example.com/other", parameter="p")
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="xss",
+            title="XSS 1",
+            url="https://app.example.com/other",
+            parameter="p",
+        )
 
         scored = score_findings(context, hunt_id)
         assert len(scored) == 2
@@ -232,8 +283,14 @@ class TestBatchScoring:
     def test_score_specific_finding(self, context, hunt_id):
         """score_findings with finding_ids filters to specific findings."""
         f1 = _insert_finding(context, hunt_id, finding_type="idor", title="IDOR 1")
-        _insert_finding(context, hunt_id, finding_type="xss", title="XSS 1",
-                        url="https://app.example.com/other", parameter="p")
+        _insert_finding(
+            context,
+            hunt_id,
+            finding_type="xss",
+            title="XSS 1",
+            url="https://app.example.com/other",
+            parameter="p",
+        )
 
         scored = score_findings(context, hunt_id, finding_ids=[f1])
         assert len(scored) == 1
@@ -270,18 +327,30 @@ class TestCLISeverity:
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
 
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "sqli", "severity": "high",
-            "title": "SQLi on /search", "url": "https://app.example.com/search",
-            "parameter": "q",
-        })
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "sqli",
+                "severity": "high",
+                "title": "SQLi on /search",
+                "url": "https://app.example.com/search",
+                "parameter": "q",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "severity", hunt.id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "severity",
+                hunt.id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) == 1
@@ -299,19 +368,32 @@ class TestCLISeverity:
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
 
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "idor", "severity": "high",
-            "title": "IDOR", "url": "https://app.example.com/api",
-            "parameter": "id",
-        })
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "idor",
+                "severity": "high",
+                "title": "IDOR",
+                "url": "https://app.example.com/api",
+                "parameter": "id",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "severity", hunt.id,
-            "--platform", "hackerone",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "severity",
+                hunt.id,
+                "--platform",
+                "hackerone",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data[0]["payout_min"] > 0
@@ -328,9 +410,15 @@ class TestCLISeverity:
         hunt = mgr.create(name="CLI Test")
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "severity", hunt.id,
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "severity",
+                hunt.id,
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         assert "No findings" in result.stdout

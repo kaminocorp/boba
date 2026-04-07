@@ -168,7 +168,9 @@ class HttpClient:
             status_code=resp.status_code,
             headers=resp_headers,
             body=resp_body,
-            body_text=resp_body.decode("utf-8", errors="replace") if truncated else (resp.text or ""),
+            body_text=resp_body.decode("utf-8", errors="replace")
+            if truncated
+            else (resp.text or ""),
             elapsed_ms=elapsed_ms,
             redirect_chain=redirect_chain,
         )
@@ -286,7 +288,9 @@ class HttpClient:
         # Send an unfuzzed baseline request — substitute the first payload of each
         # position as a representative value, so the baseline URL/body stays structurally
         # valid (e.g., /api/§id§/details → /api/1/details, not /api//details).
-        _marker_re = re.compile(rf"{re.escape(FUZZ_MARKER)}([^{re.escape(FUZZ_MARKER)}]*){re.escape(FUZZ_MARKER)}")
+        _marker_re = re.compile(
+            rf"{re.escape(FUZZ_MARKER)}([^{re.escape(FUZZ_MARKER)}]*){re.escape(FUZZ_MARKER)}"
+        )
 
         def _baseline_sub(match: re.Match) -> str:
             pos_name = match.group(1)
@@ -296,7 +300,9 @@ class HttpClient:
         baseline_url = _marker_re.sub(_baseline_sub, url)
         baseline_body = _marker_re.sub(_baseline_sub, body) if body else body
         baseline_headers = (
-            {k: _marker_re.sub(_baseline_sub, v) for k, v in headers.items()} if headers else headers
+            {k: _marker_re.sub(_baseline_sub, v) for k, v in headers.items()}
+            if headers
+            else headers
         )
         baseline_resp = await self.request(
             method=method,
@@ -476,7 +482,9 @@ class HttpClient:
             status_code=resp.status_code,
             headers=resp_headers,
             body=resp_body,
-            body_text=resp_body.decode("utf-8", errors="replace") if truncated else (resp.text or ""),
+            body_text=resp_body.decode("utf-8", errors="replace")
+            if truncated
+            else (resp.text or ""),
             elapsed_ms=elapsed_ms,
             redirect_chain=redirect_chain,
         )

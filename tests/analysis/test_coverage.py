@@ -73,12 +73,15 @@ def _make_response(status_code, body_text, request_id=1):
 class TestCoverageUpsertAndQuery:
     def test_basic_insert_and_query(self, context, hunt_id):
         """Insert a coverage row and query it back."""
-        row_id = context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/api/users/1",
-            "method": "GET",
-            "parameter": "id",
-            "test_type": "idor",
-        })
+        row_id = context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/api/users/1",
+                "method": "GET",
+                "parameter": "id",
+                "test_type": "idor",
+            },
+        )
         assert row_id > 0
 
         rows = context.get_coverage(hunt_id)
@@ -89,20 +92,26 @@ class TestCoverageUpsertAndQuery:
 
     def test_unique_constraint_updates(self, context, hunt_id):
         """Same endpoint + test type updates, doesn't duplicate."""
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/search",
-            "method": "GET",
-            "parameter": "q",
-            "test_type": "xss",
-            "notes": "first run",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/search",
-            "method": "GET",
-            "parameter": "q",
-            "test_type": "xss",
-            "notes": "second run",
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "method": "GET",
+                "parameter": "q",
+                "test_type": "xss",
+                "notes": "first run",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "method": "GET",
+                "parameter": "q",
+                "test_type": "xss",
+                "notes": "second run",
+            },
+        )
 
         rows = context.get_coverage(hunt_id)
         assert len(rows) == 1
@@ -111,23 +120,34 @@ class TestCoverageUpsertAndQuery:
     def test_different_test_types_not_deduped(self, context, hunt_id):
         """Same URL but different test types are separate rows."""
         for tt in ["idor", "xss", "sqli"]:
-            context.upsert_coverage(hunt_id, {
-                "url": "https://app.example.com/api/users/1",
-                "method": "GET",
-                "test_type": tt,
-            })
+            context.upsert_coverage(
+                hunt_id,
+                {
+                    "url": "https://app.example.com/api/users/1",
+                    "method": "GET",
+                    "test_type": tt,
+                },
+            )
 
         rows = context.get_coverage(hunt_id)
         assert len(rows) == 3
 
     def test_filter_by_test_type(self, context, hunt_id):
         """Filtering by test_type returns only matching rows."""
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/a", "test_type": "xss",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/b", "test_type": "sqli",
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/a",
+                "test_type": "xss",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/b",
+                "test_type": "sqli",
+            },
+        )
 
         rows = context.get_coverage(hunt_id, test_type="xss")
         assert len(rows) == 1
@@ -135,12 +155,20 @@ class TestCoverageUpsertAndQuery:
 
     def test_filter_by_host(self, context, hunt_id):
         """Filtering by host matches URL substring."""
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/a", "test_type": "xss",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://other.example.com/b", "test_type": "xss",
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/a",
+                "test_type": "xss",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://other.example.com/b",
+                "test_type": "xss",
+            },
+        )
 
         rows = context.get_coverage(hunt_id, host="app.example.com")
         assert len(rows) == 1
@@ -153,12 +181,15 @@ class TestCoverageUpsertAndQuery:
 class TestUntestedEndpoints:
     def test_untested_from_urls_table(self, context, hunt_id):
         """Endpoints in urls table appear as untested when no coverage exists."""
-        context.upsert_url(hunt_id, {
-            "url": "https://app.example.com/api/users",
-            "host": "app.example.com",
-            "path": "/api/users",
-            "method": "GET",
-        })
+        context.upsert_url(
+            hunt_id,
+            {
+                "url": "https://app.example.com/api/users",
+                "host": "app.example.com",
+                "path": "/api/users",
+                "method": "GET",
+            },
+        )
 
         gaps = context.get_untested_endpoints(hunt_id, test_types=["idor", "xss"])
         assert len(gaps) == 2
@@ -167,10 +198,13 @@ class TestUntestedEndpoints:
 
     def test_untested_from_directories_table(self, context, hunt_id):
         """Endpoints in directories table appear as untested."""
-        context.upsert_directory(hunt_id, {
-            "url": "https://app.example.com/admin",
-            "status_code": 200,
-        })
+        context.upsert_directory(
+            hunt_id,
+            {
+                "url": "https://app.example.com/admin",
+                "status_code": 200,
+            },
+        )
 
         gaps = context.get_untested_endpoints(hunt_id, test_types=["auth"])
         assert len(gaps) == 1
@@ -179,34 +213,46 @@ class TestUntestedEndpoints:
 
     def test_tested_endpoint_excluded_from_gaps(self, context, hunt_id):
         """An endpoint with a coverage row for a test type is NOT a gap."""
-        context.upsert_url(hunt_id, {
-            "url": "https://app.example.com/search",
-            "host": "app.example.com",
-            "path": "/search",
-            "method": "GET",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/search",
-            "method": "GET",
-            "test_type": "xss",
-        })
+        context.upsert_url(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "host": "app.example.com",
+                "path": "/search",
+                "method": "GET",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "method": "GET",
+                "test_type": "xss",
+            },
+        )
 
         gaps = context.get_untested_endpoints(hunt_id, test_types=["xss"])
         assert len(gaps) == 0
 
     def test_partial_coverage_shows_remaining_gaps(self, context, hunt_id):
         """Endpoint tested for XSS but not SQLI still shows SQLI gap."""
-        context.upsert_url(hunt_id, {
-            "url": "https://app.example.com/search",
-            "host": "app.example.com",
-            "path": "/search",
-            "method": "GET",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/search",
-            "method": "GET",
-            "test_type": "xss",
-        })
+        context.upsert_url(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "host": "app.example.com",
+                "path": "/search",
+                "method": "GET",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/search",
+                "method": "GET",
+                "test_type": "xss",
+            },
+        )
 
         gaps = context.get_untested_endpoints(hunt_id, test_types=["xss", "sqli"])
         assert len(gaps) == 1
@@ -235,9 +281,12 @@ class TestAutoRecordCoverage:
         client.request = mock_request
 
         await vuln.test_idor(
-            client, session_a, session_b,
+            client,
+            session_a,
+            session_b,
             endpoint="https://app.example.com/api/users/1",
-            context=context, hunt_id=hunt_id,
+            context=context,
+            hunt_id=hunt_id,
         )
 
         rows = context.get_coverage(hunt_id)
@@ -256,10 +305,12 @@ class TestAutoRecordCoverage:
         client.request = mock_request
 
         await vuln.test_xss(
-            client, "https://app.example.com/search",
+            client,
+            "https://app.example.com/search",
             params={"q": "", "lang": ""},
             payloads=["<script>alert(1)</script>"],
-            context=context, hunt_id=hunt_id,
+            context=context,
+            hunt_id=hunt_id,
         )
 
         rows = context.get_coverage(hunt_id)
@@ -278,10 +329,12 @@ class TestAutoRecordCoverage:
         client.request = mock_request
 
         await vuln.test_sqli(
-            client, "https://app.example.com/search",
+            client,
+            "https://app.example.com/search",
             params={"id": "1"},
             payloads=["'"],
-            context=context, hunt_id=hunt_id,
+            context=context,
+            hunt_id=hunt_id,
         )
 
         rows = context.get_coverage(hunt_id)
@@ -299,7 +352,9 @@ class TestAutoRecordCoverage:
         client.request = mock_request
 
         await vuln.test_idor(
-            client, session_a, session_b,
+            client,
+            session_a,
+            session_b,
             endpoint="https://app.example.com/api/users/1",
         )
 
@@ -316,24 +371,33 @@ class TestCoverageSummary:
         """Summary correctly counts total, tested, and untested endpoints."""
         # Add 3 known endpoints
         for path in ["/api/users", "/api/posts", "/api/settings"]:
-            context.upsert_url(hunt_id, {
-                "url": f"https://app.example.com{path}",
-                "host": "app.example.com",
-                "path": path,
-                "method": "GET",
-            })
+            context.upsert_url(
+                hunt_id,
+                {
+                    "url": f"https://app.example.com{path}",
+                    "host": "app.example.com",
+                    "path": path,
+                    "method": "GET",
+                },
+            )
 
         # Test 2 of them
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/api/users",
-            "method": "GET",
-            "test_type": "idor",
-        })
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/api/posts",
-            "method": "GET",
-            "test_type": "xss",
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/api/users",
+                "method": "GET",
+                "test_type": "idor",
+            },
+        )
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/api/posts",
+                "method": "GET",
+                "test_type": "xss",
+            },
+        )
 
         summary = get_coverage_summary(context, hunt_id)
         assert summary.total_endpoints == 3
@@ -351,16 +415,22 @@ class TestCoverageSummary:
 
     def test_gaps_filtered_by_host(self, context, hunt_id):
         """get_coverage_gaps filters by host."""
-        context.upsert_url(hunt_id, {
-            "url": "https://app.example.com/a",
-            "host": "app.example.com",
-            "method": "GET",
-        })
-        context.upsert_url(hunt_id, {
-            "url": "https://other.example.com/b",
-            "host": "other.example.com",
-            "method": "GET",
-        })
+        context.upsert_url(
+            hunt_id,
+            {
+                "url": "https://app.example.com/a",
+                "host": "app.example.com",
+                "method": "GET",
+            },
+        )
+        context.upsert_url(
+            hunt_id,
+            {
+                "url": "https://other.example.com/b",
+                "host": "other.example.com",
+                "method": "GET",
+            },
+        )
 
         gaps = get_coverage_gaps(context, hunt_id, test_types=["xss"], host="app.example.com")
         assert len(gaps) == 1
@@ -373,10 +443,13 @@ class TestCoverageSummary:
 class TestCoverageInStats:
     def test_stats_includes_coverage_count(self, context, hunt_id):
         """get_hunt_stats includes coverage count."""
-        context.upsert_coverage(hunt_id, {
-            "url": "https://app.example.com/a",
-            "test_type": "xss",
-        })
+        context.upsert_coverage(
+            hunt_id,
+            {
+                "url": "https://app.example.com/a",
+                "test_type": "xss",
+            },
+        )
         stats = context.get_hunt_stats(hunt_id)
         assert stats["coverage"] == 1
 
@@ -398,18 +471,28 @@ class TestCLICoverage:
         hunt = mgr.create(name="CLI Test")
 
         # Add an endpoint
-        mgr.context.upsert_url(hunt.id, {
-            "url": "https://app.example.com/api",
-            "host": "app.example.com",
-            "method": "GET",
-        })
+        mgr.context.upsert_url(
+            hunt.id,
+            {
+                "url": "https://app.example.com/api",
+                "host": "app.example.com",
+                "method": "GET",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "coverage", hunt.id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "coverage",
+                hunt.id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert "total_endpoints" in data
@@ -425,20 +508,31 @@ class TestCLICoverage:
         db_path = str(tmp_path / "boba.db")
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
-        mgr.context.upsert_url(hunt.id, {
-            "url": "https://app.example.com/api",
-            "host": "app.example.com",
-            "method": "GET",
-        })
+        mgr.context.upsert_url(
+            hunt.id,
+            {
+                "url": "https://app.example.com/api",
+                "host": "app.example.com",
+                "method": "GET",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "coverage", hunt.id,
-            "--untested-only",
-            "--test-type", "xss",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "coverage",
+                hunt.id,
+                "--untested-only",
+                "--test-type",
+                "xss",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) == 1

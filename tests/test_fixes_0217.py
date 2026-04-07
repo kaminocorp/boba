@@ -104,9 +104,7 @@ class TestHttpxRunnerTypeGuard:
 
     def test_a_field_is_list(self):
         adapter = self._adapter()
-        record = adapter.parse_record(
-            {"input": "example.com", "a": ["1.2.3.4", "5.6.7.8"]}
-        )
+        record = adapter.parse_record({"input": "example.com", "a": ["1.2.3.4", "5.6.7.8"]})
         assert record["ip"] == "1.2.3.4"
 
     def test_tls_field_is_none(self):
@@ -121,9 +119,7 @@ class TestHttpxRunnerTypeGuard:
 
     def test_tls_field_is_dict(self):
         adapter = self._adapter()
-        record = adapter.parse_record(
-            {"input": "example.com", "tls": {"version": "TLS1.3"}}
-        )
+        record = adapter.parse_record({"input": "example.com", "tls": {"version": "TLS1.3"}})
         assert record["tls_version"] == "TLS1.3"
 
 
@@ -251,13 +247,16 @@ class TestFindingUpsertFlagPreservation:
         ctx._conn.commit()
 
         # First insert: confirmed by tool
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "xss",
-            "title": "XSS on /page",
-            "url": "http://a.com/page",
-            "parameter": "q",
-            "confirmed": True,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "title": "XSS on /page",
+                "url": "http://a.com/page",
+                "parameter": "q",
+                "confirmed": True,
+            },
+        )
 
         # Verify confirmed=1
         row = ctx._conn.execute(
@@ -267,13 +266,16 @@ class TestFindingUpsertFlagPreservation:
         assert row[0] == 1
 
         # Re-scan: tool does NOT confirm (confirmed=False)
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "xss",
-            "title": "XSS on /page (rescan)",
-            "url": "http://a.com/page",
-            "parameter": "q",
-            "confirmed": False,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "title": "XSS on /page (rescan)",
+                "url": "http://a.com/page",
+                "parameter": "q",
+                "confirmed": False,
+            },
+        )
 
         # confirmed should still be 1 (preserved via MAX)
         row = ctx._conn.execute(
@@ -294,22 +296,28 @@ class TestFindingUpsertFlagPreservation:
         ctx._conn.commit()
 
         # Mark as false positive manually
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "sqli",
-            "title": "SQLi on /api",
-            "url": "http://a.com/api",
-            "parameter": "id",
-            "false_positive": True,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "sqli",
+                "title": "SQLi on /api",
+                "url": "http://a.com/api",
+                "parameter": "id",
+                "false_positive": True,
+            },
+        )
 
         # Re-scan: tool doesn't set false_positive
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "sqli",
-            "title": "SQLi on /api (rescan)",
-            "url": "http://a.com/api",
-            "parameter": "id",
-            "false_positive": False,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "sqli",
+                "title": "SQLi on /api (rescan)",
+                "url": "http://a.com/api",
+                "parameter": "id",
+                "false_positive": False,
+            },
+        )
 
         row = ctx._conn.execute(
             "SELECT false_positive FROM findings WHERE hunt_id=? AND url=?",
@@ -329,22 +337,28 @@ class TestFindingUpsertFlagPreservation:
         ctx._conn.commit()
 
         # Initial: not confirmed
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "xss",
-            "title": "XSS on /page",
-            "url": "http://a.com/page",
-            "parameter": "q",
-            "confirmed": False,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "title": "XSS on /page",
+                "url": "http://a.com/page",
+                "parameter": "q",
+                "confirmed": False,
+            },
+        )
 
         # Second pass: confirmed
-        ctx.upsert_finding(hunt_id, {
-            "finding_type": "xss",
-            "title": "XSS on /page",
-            "url": "http://a.com/page",
-            "parameter": "q",
-            "confirmed": True,
-        })
+        ctx.upsert_finding(
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "title": "XSS on /page",
+                "url": "http://a.com/page",
+                "parameter": "q",
+                "confirmed": True,
+            },
+        )
 
         row = ctx._conn.execute(
             "SELECT confirmed FROM findings WHERE hunt_id=? AND url=?",
@@ -399,6 +413,7 @@ class TestCliCleanupLogging:
         from boba.cli.main import _safe_close_http
 
         client = MagicMock()
+
         # Make the close coroutine raise
         async def bad_close():
             raise RuntimeError("connection reset")

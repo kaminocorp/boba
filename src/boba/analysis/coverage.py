@@ -77,9 +77,7 @@ def get_coverage_gaps(
     return gaps
 
 
-def _get_known_endpoints(
-    context: HuntContext, hunt_id: str, host: str | None = None
-) -> set[str]:
+def _get_known_endpoints(context: HuntContext, hunt_id: str, host: str | None = None) -> set[str]:
     """Collect unique endpoint URLs from urls + directories tables."""
     urls = context.get_urls(hunt_id, host=host)
     directories = context.get_directories(hunt_id)

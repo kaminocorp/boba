@@ -52,8 +52,11 @@ def calculate_cvss(
 
     # Exploitability sub-score
     exploitability = (
-        8.22 * _AV[attack_vector] * _AC[attack_complexity]
-        * pr_weights[privileges_required] * _UI[user_interaction]
+        8.22
+        * _AV[attack_vector]
+        * _AC[attack_complexity]
+        * pr_weights[privileges_required]
+        * _UI[user_interaction]
     )
 
     # Base score
@@ -103,34 +106,64 @@ def severity_from_score(score: float) -> Severity:
 # Maps (finding_type, evidence_signals) → CVSS metric overrides
 _AUTO_SCORE_RULES: dict[str, dict[str, str]] = {
     "idor": {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "L", "user_interaction": "N",
-        "scope": "U", "confidentiality": "H", "integrity": "L", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "L",
+        "user_interaction": "N",
+        "scope": "U",
+        "confidentiality": "H",
+        "integrity": "L",
+        "availability": "N",
     },
     "ssrf": {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "N",
-        "scope": "C", "confidentiality": "H", "integrity": "N", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "N",
+        "user_interaction": "N",
+        "scope": "C",
+        "confidentiality": "H",
+        "integrity": "N",
+        "availability": "N",
     },
     "xss": {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "R",
-        "scope": "C", "confidentiality": "L", "integrity": "L", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "N",
+        "user_interaction": "R",
+        "scope": "C",
+        "confidentiality": "L",
+        "integrity": "L",
+        "availability": "N",
     },
     "sqli": {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "N",
-        "scope": "U", "confidentiality": "H", "integrity": "H", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "N",
+        "user_interaction": "N",
+        "scope": "U",
+        "confidentiality": "H",
+        "integrity": "H",
+        "availability": "N",
     },
     "auth": {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "N",
-        "scope": "U", "confidentiality": "H", "integrity": "H", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "N",
+        "user_interaction": "N",
+        "scope": "U",
+        "confidentiality": "H",
+        "integrity": "H",
+        "availability": "N",
     },
     "http": {  # Nuclei finding type — default to medium
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "N",
-        "scope": "U", "confidentiality": "L", "integrity": "N", "availability": "N",
+        "attack_vector": "N",
+        "attack_complexity": "L",
+        "privileges_required": "N",
+        "user_interaction": "N",
+        "scope": "U",
+        "confidentiality": "L",
+        "integrity": "N",
+        "availability": "N",
     },
 }
 
@@ -142,11 +175,21 @@ def auto_score_finding(finding: dict[str, Any]) -> CVSSScore:
     evidence signals (e.g., cloud metadata access upgrades SSRF severity).
     """
     ftype = finding.get("finding_type", "")
-    metrics = dict(_AUTO_SCORE_RULES.get(ftype, {
-        "attack_vector": "N", "attack_complexity": "L",
-        "privileges_required": "N", "user_interaction": "N",
-        "scope": "U", "confidentiality": "L", "integrity": "N", "availability": "N",
-    }))
+    metrics = dict(
+        _AUTO_SCORE_RULES.get(
+            ftype,
+            {
+                "attack_vector": "N",
+                "attack_complexity": "L",
+                "privileges_required": "N",
+                "user_interaction": "N",
+                "scope": "U",
+                "confidentiality": "L",
+                "integrity": "N",
+                "availability": "N",
+            },
+        )
+    )
 
     # Evidence-based refinements
     evidence = finding.get("evidence")
@@ -201,9 +244,7 @@ PAYOUT_TIERS: dict[str, dict[str, tuple[int, int]]] = {
 }
 
 
-def estimate_payout(
-    severity: Severity, platform: str = "hackerone"
-) -> tuple[int, int]:
+def estimate_payout(severity: Severity, platform: str = "hackerone") -> tuple[int, int]:
     """Return (min, max) estimated payout for a severity level on a platform."""
     tiers = PAYOUT_TIERS.get(platform, PAYOUT_TIERS["hackerone"])
     return tiers.get(severity.value, (0, 0))

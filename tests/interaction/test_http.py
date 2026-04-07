@@ -293,7 +293,9 @@ class TestUpload:
 
     @pytest.mark.asyncio
     async def test_upload_single_file_returns_response(self, client):
-        mock_resp = _mock_response(status_code=200, content=b'{"uploaded": true}', text='{"uploaded": true}')
+        mock_resp = _mock_response(
+            status_code=200, content=b'{"uploaded": true}', text='{"uploaded": true}'
+        )
         client._client.request = AsyncMock(return_value=mock_resp)
 
         resp = await client.upload(

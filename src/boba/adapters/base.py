@@ -282,7 +282,9 @@ class BaseAdapter(ABC):
         blocked = {f.lower() for f in cls._BLOCKED_EXTRA_FLAGS}
         # Short flags (1-3 chars after dash) that may have concatenated values
         # e.g. -o/tmp/evil or -oJ — detect via prefix match
-        short_blocked = {f for f in blocked if len(f) <= 3 and f.startswith("-") and not f.startswith("--")}
+        short_blocked = {
+            f for f in blocked if len(f) <= 3 and f.startswith("-") and not f.startswith("--")
+        }
         for arg in args:
             if skip_next:
                 skip_next = False

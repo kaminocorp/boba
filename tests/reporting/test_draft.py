@@ -16,22 +16,29 @@ def hunt_id(context):
 
 
 def _insert_finding(context, hunt_id, **kwargs):
-    return context.upsert_finding(hunt_id, {
-        "finding_type": kwargs.get("finding_type", "xss"),
-        "severity": kwargs.get("severity", "medium"),
-        "title": kwargs.get("title", "XSS on /search"),
-        "url": kwargs.get("url", "https://app.example.com/search"),
-        "parameter": kwargs.get("parameter", "q"),
-        "evidence": kwargs.get("evidence"),
-        "request_ids": kwargs.get("request_ids", []),
-    })
+    return context.upsert_finding(
+        hunt_id,
+        {
+            "finding_type": kwargs.get("finding_type", "xss"),
+            "severity": kwargs.get("severity", "medium"),
+            "title": kwargs.get("title", "XSS on /search"),
+            "url": kwargs.get("url", "https://app.example.com/search"),
+            "parameter": kwargs.get("parameter", "q"),
+            "evidence": kwargs.get("evidence"),
+            "request_ids": kwargs.get("request_ids", []),
+        },
+    )
 
 
 class TestDraftFindingReport:
     def test_report_structure(self, context, hunt_id):
         """Draft has all required fields populated."""
-        fid = _insert_finding(context, hunt_id, finding_type="sqli",
-                              evidence=[{"type": "error_based", "payload": "' OR 1=1--"}])
+        fid = _insert_finding(
+            context,
+            hunt_id,
+            finding_type="sqli",
+            evidence=[{"type": "error_based", "payload": "' OR 1=1--"}],
+        )
 
         draft = draft_finding_report(context, hunt_id, fid)
 
@@ -48,9 +55,13 @@ class TestDraftFindingReport:
 
     def test_title_format(self, context, hunt_id):
         """Title follows [Component] [Vuln Type] leads to [Impact] pattern."""
-        fid = _insert_finding(context, hunt_id, finding_type="idor",
-                              url="https://app.example.com/api/users",
-                              parameter="id")
+        fid = _insert_finding(
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/users",
+            parameter="id",
+        )
 
         draft = draft_finding_report(context, hunt_id, fid)
 
@@ -59,8 +70,9 @@ class TestDraftFindingReport:
 
     def test_includes_evidence_in_steps(self, context, hunt_id):
         """Evidence payloads appear in reproduction steps."""
-        fid = _insert_finding(context, hunt_id, finding_type="sqli",
-                              evidence=[{"payload": "' OR 1=1--"}])
+        fid = _insert_finding(
+            context, hunt_id, finding_type="sqli", evidence=[{"payload": "' OR 1=1--"}]
+        )
 
         draft = draft_finding_report(context, hunt_id, fid)
 
@@ -87,21 +99,32 @@ class TestDraftFindingReport:
 class TestDraftChainReport:
     def test_chain_report_merges_findings(self, context, hunt_id):
         """Chain report merges steps from all chained findings."""
-        f1 = _insert_finding(context, hunt_id, finding_type="idor",
-                             url="https://app.example.com/api/users",
-                             parameter="id")
-        f2 = _insert_finding(context, hunt_id, finding_type="sqli",
-                             url="https://app.example.com/api/search",
-                             parameter="q",
-                             evidence=[{"type": "error_based"}])
+        f1 = _insert_finding(
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/users",
+            parameter="id",
+        )
+        f2 = _insert_finding(
+            context,
+            hunt_id,
+            finding_type="sqli",
+            url="https://app.example.com/api/search",
+            parameter="q",
+            evidence=[{"type": "error_based"}],
+        )
 
-        chain_id = context.upsert_chain(hunt_id, {
-            "title": "IDOR + SQLi Chain",
-            "severity": "critical",
-            "cvss_score": 9.8,
-            "finding_ids": [f1, f2],
-            "impact": "Full data exfiltration",
-        })
+        chain_id = context.upsert_chain(
+            hunt_id,
+            {
+                "title": "IDOR + SQLi Chain",
+                "severity": "critical",
+                "cvss_score": 9.8,
+                "finding_ids": [f1, f2],
+                "impact": "Full data exfiltration",
+            },
+        )
 
         draft = draft_chain_report(context, hunt_id, chain_id)
 

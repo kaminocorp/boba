@@ -168,9 +168,15 @@ class TestScopeDefaultDeny:
         from boba.core.scope import ScopeEngine
         from boba.core.models import ScopeConfig, ScopeRule, ScopeRuleType, ScopeAction
 
-        config = ScopeConfig(rules=[
-            ScopeRule(pattern="*.example.com", rule_type=ScopeRuleType.DOMAIN, action=ScopeAction.INCLUDE)
-        ])
+        config = ScopeConfig(
+            rules=[
+                ScopeRule(
+                    pattern="*.example.com",
+                    rule_type=ScopeRuleType.DOMAIN,
+                    action=ScopeAction.INCLUDE,
+                )
+            ]
+        )
         scope = ScopeEngine(config)
 
         # Create a minimal concrete adapter
@@ -258,23 +264,33 @@ class TestBrowserCLI:
         mock_browser = MagicMock()
         mock_browser.start = AsyncMock()
         mock_browser.stop = AsyncMock()
-        mock_browser.navigate = AsyncMock(return_value=PageInfo(
-            url="https://example.com",
-            final_url="https://example.com/",
-            status_code=200,
-            title="Example",
-            content_type="text/html",
-            timing_ms=100.0,
-            requests_captured=5,
-        ))
+        mock_browser.navigate = AsyncMock(
+            return_value=PageInfo(
+                url="https://example.com",
+                final_url="https://example.com/",
+                status_code=200,
+                title="Example",
+                content_type="text/html",
+                timing_ms=100.0,
+                requests_captured=5,
+            )
+        )
         mock_get_browser.return_value = mock_browser
 
-        result = runner.invoke(app, [
-            "browser", "navigate", hunt_id,
-            "--url", "https://example.com",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "browser",
+                "navigate",
+                hunt_id,
+                "--url",
+                "https://example.com",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status_code"] == 200
@@ -290,12 +306,20 @@ class TestBrowserCLI:
         mock_browser.screenshot = AsyncMock(return_value="/tmp/shot.png")
         mock_get_browser.return_value = mock_browser
 
-        result = runner.invoke(app, [
-            "browser", "screenshot", hunt_id,
-            "--url", "https://example.com",
-            "--path", "/tmp/shot.png",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "browser",
+                "screenshot",
+                hunt_id,
+                "--url",
+                "https://example.com",
+                "--path",
+                "/tmp/shot.png",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         assert "shot.png" in result.output
 
@@ -306,23 +330,33 @@ class TestBrowserCLI:
         mock_browser.start = AsyncMock()
         mock_browser.stop = AsyncMock()
         mock_browser.navigate = AsyncMock()
-        mock_browser.extract = AsyncMock(return_value=DOMExtraction(
-            url="https://example.com",
-            title="Example",
-            links=[],
-            forms=[],
-            scripts=[],
-            meta={},
-            comments=[],
-        ))
+        mock_browser.extract = AsyncMock(
+            return_value=DOMExtraction(
+                url="https://example.com",
+                title="Example",
+                links=[],
+                forms=[],
+                scripts=[],
+                meta={},
+                comments=[],
+            )
+        )
         mock_get_browser.return_value = mock_browser
 
-        result = runner.invoke(app, [
-            "browser", "extract", hunt_id,
-            "--url", "https://example.com",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "browser",
+                "extract",
+                hunt_id,
+                "--url",
+                "https://example.com",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["title"] == "Example"
@@ -340,13 +374,22 @@ class TestHttpCLI:
         mock_client.close = AsyncMock()
         mock_get_client.return_value = mock_client
 
-        result = runner.invoke(app, [
-            "http", "request", hunt_id,
-            "--url", "https://example.com",
-            "--method", "GET",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "http",
+                "request",
+                hunt_id,
+                "--url",
+                "https://example.com",
+                "--method",
+                "GET",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status_code"] == 200
@@ -359,12 +402,20 @@ class TestHttpCLI:
         mock_client.close = AsyncMock()
         mock_get_client.return_value = mock_client
 
-        result = runner.invoke(app, [
-            "http", "replay", hunt_id,
-            "--request-id", "1",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "http",
+                "replay",
+                hunt_id,
+                "--request-id",
+                "1",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["request_id"] == 2
@@ -373,23 +424,34 @@ class TestHttpCLI:
     def test_http_compare(self, mock_get_client, tmp_path):
         hunt_id = _create_hunt(tmp_path)
         mock_client = MagicMock()
-        mock_client.compare = AsyncMock(return_value=CompareResult(
-            status_match=True,
-            header_diffs=[],
-            body_diff_summary="similar",
-            body_length_a=100,
-            body_length_b=105,
-        ))
+        mock_client.compare = AsyncMock(
+            return_value=CompareResult(
+                status_match=True,
+                header_diffs=[],
+                body_diff_summary="similar",
+                body_length_a=100,
+                body_length_b=105,
+            )
+        )
         mock_client.close = AsyncMock()
         mock_get_client.return_value = mock_client
 
-        result = runner.invoke(app, [
-            "http", "compare", hunt_id,
-            "--id-a", "1",
-            "--id-b", "2",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "http",
+                "compare",
+                hunt_id,
+                "--id-a",
+                "1",
+                "--id-b",
+                "2",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status_match"] is True
@@ -412,21 +474,35 @@ class TestVulnCLI:
 
         mock_sess = MagicMock()
         mock_sess.get.return_value = SessionState(
-            name="a", target_url="https://example.com",
-            auth_method=AuthMethod.BEARER, headers={}, cookies={}, is_valid=True,
+            name="a",
+            target_url="https://example.com",
+            auth_method=AuthMethod.BEARER,
+            headers={},
+            cookies={},
+            is_valid=True,
         )
         mock_get_sess.return_value = mock_sess
 
         mock_idor.return_value = _mock_vuln_result(test_type="idor")
 
-        result = runner.invoke(app, [
-            "test", "idor", hunt_id,
-            "--endpoint", "https://example.com/api/user/1",
-            "--session-a", "alice",
-            "--session-b", "bob",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "idor",
+                hunt_id,
+                "--endpoint",
+                "https://example.com/api/user/1",
+                "--session-a",
+                "alice",
+                "--session-b",
+                "bob",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["test_type"] == "idor"
@@ -440,13 +516,22 @@ class TestVulnCLI:
         mock_get_client.return_value = mock_client
         mock_ssrf.return_value = _mock_vuln_result(test_type="ssrf")
 
-        result = runner.invoke(app, [
-            "test", "ssrf", hunt_id,
-            "--url", "https://example.com/fetch",
-            "--param", "url",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "ssrf",
+                hunt_id,
+                "--url",
+                "https://example.com/fetch",
+                "--param",
+                "url",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["test_type"] == "ssrf"
@@ -460,13 +545,22 @@ class TestVulnCLI:
         mock_get_client.return_value = mock_client
         mock_xss.return_value = _mock_vuln_result(test_type="xss")
 
-        result = runner.invoke(app, [
-            "test", "xss", hunt_id,
-            "--url", "https://example.com/search",
-            "--param", "q",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "xss",
+                hunt_id,
+                "--url",
+                "https://example.com/search",
+                "--param",
+                "q",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["test_type"] == "xss"
@@ -480,13 +574,22 @@ class TestVulnCLI:
         mock_get_client.return_value = mock_client
         mock_sqli.return_value = _mock_vuln_result(test_type="sqli")
 
-        result = runner.invoke(app, [
-            "test", "sqli", hunt_id,
-            "--url", "https://example.com/api/items",
-            "--param", "id",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "sqli",
+                hunt_id,
+                "--url",
+                "https://example.com/api/items",
+                "--param",
+                "id",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["test_type"] == "sqli"
@@ -500,12 +603,20 @@ class TestVulnCLI:
         mock_get_client.return_value = mock_client
         mock_auth.return_value = _mock_vuln_result(test_type="auth")
 
-        result = runner.invoke(app, [
-            "test", "auth", hunt_id,
-            "--endpoint", "https://example.com/admin",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "test",
+                "auth",
+                hunt_id,
+                "--endpoint",
+                "https://example.com/admin",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["test_type"] == "auth"
@@ -521,11 +632,19 @@ class TestSessionCLI:
         mock_mgr = MagicMock()
         mock_get_sess.return_value = mock_mgr
 
-        result = runner.invoke(app, [
-            "session", "login-token", hunt_id, "alice",
-            "--token", "eyJhbGciOiJIUzI1NiJ9.test",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "session",
+                "login-token",
+                hunt_id,
+                "alice",
+                "--token",
+                "eyJhbGciOiJIUzI1NiJ9.test",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         assert "Bearer token set" in result.output
         mock_mgr.login_bearer.assert_called_once_with("alice", "eyJhbGciOiJIUzI1NiJ9.test")
@@ -535,16 +654,32 @@ class TestEnumCrawlCLI:
     @patch("boba.tools.enum.crawl", new_callable=AsyncMock)
     def test_enum_crawl(self, mock_crawl, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        mock_crawl.return_value = _make_result("katana", [
-            {"url": "https://example.com/page", "host": "example.com", "path": "/page", "source": "katana"},
-        ])
+        mock_crawl.return_value = _make_result(
+            "katana",
+            [
+                {
+                    "url": "https://example.com/page",
+                    "host": "example.com",
+                    "path": "/page",
+                    "source": "katana",
+                },
+            ],
+        )
 
-        result = runner.invoke(app, [
-            "enum", "crawl", hunt_id,
-            "--targets", "https://example.com",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "enum",
+                "crawl",
+                hunt_id,
+                "--targets",
+                "https://example.com",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["tool"] == "katana"
@@ -554,44 +689,72 @@ class TestEnumCrawlCLI:
 class TestContextOobCLI:
     def test_context_oob_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(app, [
-            "context", "oob", hunt_id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "oob",
+                hunt_id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
 
 
 class TestContextFindingsCLI:
     def test_context_findings_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(app, [
-            "context", "findings", hunt_id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "findings",
+                hunt_id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
 
 
 class TestContextSessionsCLI:
     def test_context_sessions_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(app, [
-            "context", "sessions", hunt_id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "sessions",
+                hunt_id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
 
 
 class TestContextHttpHistoryCLI:
     def test_context_http_history_empty(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(app, [
-            "context", "http-history", hunt_id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "context",
+                "http-history",
+                hunt_id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
 
 
@@ -600,20 +763,35 @@ class TestContextHttpHistoryCLI:
 # ═══════════════════════════════════════════════════════════════
 class TestCLIErrorHandling:
     def test_nonexistent_hunt_id(self, tmp_path):
-        result = runner.invoke(app, [
-            "hunt", "status", "nonexistent-hunt-id",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "hunt",
+                "status",
+                "nonexistent-hunt-id",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 1
 
     def test_invalid_auth_method(self, tmp_path):
         hunt_id = _create_hunt(tmp_path)
-        result = runner.invoke(app, [
-            "session", "create", hunt_id,
-            "--name", "test",
-            "--target", "https://example.com",
-            "--method", "invalid_method",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "session",
+                "create",
+                hunt_id,
+                "--name",
+                "test",
+                "--target",
+                "https://example.com",
+                "--method",
+                "invalid_method",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 1
         assert "Invalid auth method" in result.output

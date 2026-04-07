@@ -38,13 +38,18 @@ class TestDedupGroupCRUD:
     def test_insert_and_query(self, context, hunt_id):
         """Insert a dedup group and query it back."""
         f1 = _insert_finding(context, hunt_id, title="Finding 1")
-        f2 = _insert_finding(context, hunt_id, title="Finding 2", url="https://app.example.com/search2")
+        f2 = _insert_finding(
+            context, hunt_id, title="Finding 2", url="https://app.example.com/search2"
+        )
 
-        gid = context.insert_dedup_group(hunt_id, {
-            "canonical_id": f1,
-            "finding_ids": [f1, f2],
-            "reason": "Same param on same host",
-        })
+        gid = context.insert_dedup_group(
+            hunt_id,
+            {
+                "canonical_id": f1,
+                "finding_ids": [f1, f2],
+                "reason": "Same param on same host",
+            },
+        )
         assert gid > 0
 
         groups = context.get_dedup_groups(hunt_id)
@@ -55,11 +60,14 @@ class TestDedupGroupCRUD:
     def test_delete_dedup_groups(self, context, hunt_id):
         """delete_dedup_groups clears all groups for a hunt."""
         f1 = _insert_finding(context, hunt_id, title="F1")
-        context.insert_dedup_group(hunt_id, {
-            "canonical_id": f1,
-            "finding_ids": [f1],
-            "reason": "test",
-        })
+        context.insert_dedup_group(
+            hunt_id,
+            {
+                "canonical_id": f1,
+                "finding_ids": [f1],
+                "reason": "test",
+            },
+        )
 
         deleted = context.delete_dedup_groups(hunt_id)
         assert deleted == 1
@@ -70,11 +78,14 @@ class TestDedupGroupCRUD:
         f1 = _insert_finding(context, hunt_id, title="Canonical", url="https://a.com/1")
         f2 = _insert_finding(context, hunt_id, title="Dupe", url="https://a.com/2")
 
-        context.insert_dedup_group(hunt_id, {
-            "canonical_id": f1,
-            "finding_ids": [f1, f2],
-            "reason": "test",
-        })
+        context.insert_dedup_group(
+            hunt_id,
+            {
+                "canonical_id": f1,
+                "finding_ids": [f1, f2],
+                "reason": "test",
+            },
+        )
 
         assert context.is_duplicate(hunt_id, f2) is True
         assert context.is_duplicate(hunt_id, f1) is False
@@ -84,11 +95,14 @@ class TestDedupGroupCRUD:
         f1 = _insert_finding(context, hunt_id, title="Canonical", url="https://a.com/1")
         f2 = _insert_finding(context, hunt_id, title="Dupe", url="https://a.com/2")
 
-        context.insert_dedup_group(hunt_id, {
-            "canonical_id": f1,
-            "finding_ids": [f1, f2],
-            "reason": "test",
-        })
+        context.insert_dedup_group(
+            hunt_id,
+            {
+                "canonical_id": f1,
+                "finding_ids": [f1, f2],
+                "reason": "test",
+            },
+        )
 
         canonical = context.get_canonical_finding(hunt_id, f2)
         assert canonical is not None
@@ -116,13 +130,19 @@ class TestDeduplicateFindings:
         cross-tool dedup we use two findings in the same normalized class.
         """
         _insert_finding(
-            context, hunt_id, finding_type="nuclei",
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="nuclei",
+            url="https://app.example.com/search",
+            parameter="q",
             title="Nuclei SQLi template match (manual)",
         )
         _insert_finding(
-            context, hunt_id, finding_type="http",  # Normalizes to "nuclei"
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="http",  # Normalizes to "nuclei"
+            url="https://app.example.com/search",
+            parameter="q",
             title="Nuclei SQLi template match (auto)",
         )
 
@@ -133,13 +153,19 @@ class TestDeduplicateFindings:
     def test_same_host_param_vuln_class(self, context, hunt_id):
         """Same host + param + vuln class across different API versions → grouped."""
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app.example.com/api/v1/users", parameter="id",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/v1/users",
+            parameter="id",
             title="IDOR on v1 users",
         )
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app.example.com/api/v2/users", parameter="id",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/v2/users",
+            parameter="id",
             title="IDOR on v2 users",
         )
 
@@ -150,13 +176,19 @@ class TestDeduplicateFindings:
     def test_no_false_dedup_different_params(self, context, hunt_id):
         """Different params on same URL → NOT grouped."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="q",
             title="XSS on q",
         )
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/search", parameter="lang",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="lang",
             title="XSS on lang",
         )
 
@@ -166,13 +198,19 @@ class TestDeduplicateFindings:
     def test_no_false_dedup_different_hosts(self, context, hunt_id):
         """Same param + vuln class but different hosts → NOT grouped."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app1.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app1.example.com/search",
+            parameter="q",
             title="XSS on app1",
         )
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app2.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app2.example.com/search",
+            parameter="q",
             title="XSS on app2",
         )
 
@@ -182,14 +220,24 @@ class TestDeduplicateFindings:
     def test_canonical_selection_confirmed_wins(self, context, hunt_id):
         """Confirmed finding is selected as canonical over unconfirmed."""
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app.example.com/api/users", parameter="id",
-            title="IDOR unconfirmed", confirmed=False, severity="high",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/users",
+            parameter="id",
+            title="IDOR unconfirmed",
+            confirmed=False,
+            severity="high",
         )
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app.example.com/api/v2/users", parameter="id",
-            title="IDOR confirmed", confirmed=True, severity="medium",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/v2/users",
+            parameter="id",
+            title="IDOR confirmed",
+            confirmed=True,
+            severity="medium",
         )
 
         groups = deduplicate_findings(context, hunt_id)
@@ -200,14 +248,22 @@ class TestDeduplicateFindings:
     def test_canonical_selection_severity_tiebreak(self, context, hunt_id):
         """When confidence is equal, higher severity wins."""
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/proxy", parameter="url",
-            title="SSRF medium", severity="medium",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/proxy",
+            parameter="url",
+            title="SSRF medium",
+            severity="medium",
         )
         _insert_finding(
-            context, hunt_id, finding_type="ssrf",
-            url="https://app.example.com/api/proxy", parameter="url",
-            title="SSRF critical", severity="critical",
+            context,
+            hunt_id,
+            finding_type="ssrf",
+            url="https://app.example.com/api/proxy",
+            parameter="url",
+            title="SSRF critical",
+            severity="critical",
         )
 
         groups = deduplicate_findings(context, hunt_id)
@@ -218,12 +274,18 @@ class TestDeduplicateFindings:
     def test_idempotent(self, context, hunt_id):
         """Running deduplicate_findings twice doesn't create duplicate groups."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/a", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/a",
+            parameter="q",
         )
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/b", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/b",
+            parameter="q",
         )
 
         groups1 = deduplicate_findings(context, hunt_id)
@@ -236,12 +298,18 @@ class TestDeduplicateFindings:
     def test_dry_run_does_not_persist(self, context, hunt_id):
         """dry_run=True returns groups but does not write to DB."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/a", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/a",
+            parameter="q",
         )
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/b", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/b",
+            parameter="q",
         )
 
         groups = deduplicate_findings(context, hunt_id, dry_run=True)
@@ -264,45 +332,66 @@ class TestCheckDuplicate:
     def test_exact_match(self, context, hunt_id):
         """check_duplicate finds an exact URL+param match."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="q",
         )
 
-        result = check_duplicate(context, hunt_id, {
-            "finding_type": "xss",
-            "url": "https://app.example.com/search",
-            "parameter": "q",
-        })
+        result = check_duplicate(
+            context,
+            hunt_id,
+            {
+                "finding_type": "xss",
+                "url": "https://app.example.com/search",
+                "parameter": "q",
+            },
+        )
         assert result is not None
         assert "Exact URL" in result.reason
 
     def test_host_param_match(self, context, hunt_id):
         """check_duplicate finds a host+param match on different path."""
         _insert_finding(
-            context, hunt_id, finding_type="idor",
-            url="https://app.example.com/api/v1/users", parameter="id",
+            context,
+            hunt_id,
+            finding_type="idor",
+            url="https://app.example.com/api/v1/users",
+            parameter="id",
         )
 
-        result = check_duplicate(context, hunt_id, {
-            "finding_type": "idor",
-            "url": "https://app.example.com/api/v2/users",
-            "parameter": "id",
-        })
+        result = check_duplicate(
+            context,
+            hunt_id,
+            {
+                "finding_type": "idor",
+                "url": "https://app.example.com/api/v2/users",
+                "parameter": "id",
+            },
+        )
         assert result is not None
         assert "Same host" in result.reason
 
     def test_no_match(self, context, hunt_id):
         """check_duplicate returns None when no match exists."""
         _insert_finding(
-            context, hunt_id, finding_type="xss",
-            url="https://app.example.com/search", parameter="q",
+            context,
+            hunt_id,
+            finding_type="xss",
+            url="https://app.example.com/search",
+            parameter="q",
         )
 
-        result = check_duplicate(context, hunt_id, {
-            "finding_type": "sqli",
-            "url": "https://other.example.com/search",
-            "parameter": "id",
-        })
+        result = check_duplicate(
+            context,
+            hunt_id,
+            {
+                "finding_type": "sqli",
+                "url": "https://other.example.com/search",
+                "parameter": "id",
+            },
+        )
         assert result is None
 
 
@@ -322,23 +411,40 @@ class TestCLIDedupe:
         hunt = mgr.create(name="CLI Test")
 
         # Insert two findings that should be deduped (same host + param + type)
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "xss", "severity": "medium",
-            "title": "XSS on /a", "url": "https://app.example.com/a",
-            "parameter": "q",
-        })
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "xss", "severity": "high",
-            "title": "XSS on /b", "url": "https://app.example.com/b",
-            "parameter": "q",
-        })
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "xss",
+                "severity": "medium",
+                "title": "XSS on /a",
+                "url": "https://app.example.com/a",
+                "parameter": "q",
+            },
+        )
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "xss",
+                "severity": "high",
+                "title": "XSS on /b",
+                "url": "https://app.example.com/b",
+                "parameter": "q",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "dedupe", hunt.id,
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "dedupe",
+                hunt.id,
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) == 1
@@ -355,24 +461,41 @@ class TestCLIDedupe:
         mgr = HuntManager(db_path=db_path)
         hunt = mgr.create(name="CLI Test")
 
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "idor", "severity": "high",
-            "title": "IDOR 1", "url": "https://app.example.com/api/v1",
-            "parameter": "id",
-        })
-        mgr.context.upsert_finding(hunt.id, {
-            "finding_type": "idor", "severity": "high",
-            "title": "IDOR 2", "url": "https://app.example.com/api/v2",
-            "parameter": "id",
-        })
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "idor",
+                "severity": "high",
+                "title": "IDOR 1",
+                "url": "https://app.example.com/api/v1",
+                "parameter": "id",
+            },
+        )
+        mgr.context.upsert_finding(
+            hunt.id,
+            {
+                "finding_type": "idor",
+                "severity": "high",
+                "title": "IDOR 2",
+                "url": "https://app.example.com/api/v2",
+                "parameter": "id",
+            },
+        )
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "dedupe", hunt.id,
-            "--dry-run",
-            "--format", "json",
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "dedupe",
+                hunt.id,
+                "--dry-run",
+                "--format",
+                "json",
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert len(data) == 1
@@ -394,9 +517,15 @@ class TestCLIDedupe:
         hunt = mgr.create(name="CLI Test")
         mgr.close_context()
 
-        result = runner.invoke(app, [
-            "analyze", "dedupe", hunt.id,
-            "--data-dir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "analyze",
+                "dedupe",
+                hunt.id,
+                "--data-dir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code == 0
         assert "No duplicate" in result.stdout

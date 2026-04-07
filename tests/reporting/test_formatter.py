@@ -91,8 +91,10 @@ class TestMarkdownFormat:
     def test_no_cvss_section_without_vector(self):
         """No CVSS Details section when vector is empty."""
         report = ReportDraft(
-            title="Test", severity=Severity.LOW,
-            summary="test", impact="test",
+            title="Test",
+            severity=Severity.LOW,
+            summary="test",
+            impact="test",
         )
         output = format_markdown(report)
         assert "## CVSS Details" not in output

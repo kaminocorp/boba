@@ -10,15 +10,15 @@ from boba.core.models import ReportDraft, ReportStatus, Severity
 # Vuln-type-specific remediation suggestions
 _REMEDIATION: dict[str, str] = {
     "idor": "Implement server-side authorization checks on every resource access. "
-            "Verify the requesting user owns or has permission to access the resource.",
+    "Verify the requesting user owns or has permission to access the resource.",
     "ssrf": "Validate and whitelist allowed URLs server-side. Block requests to internal "
-            "IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x). Use an allowlist, not a denylist.",
+    "IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x). Use an allowlist, not a denylist.",
     "xss": "Encode all user-controlled output contextually (HTML entity, JS string, URL, CSS). "
-           "Implement a strict Content-Security-Policy header.",
+    "Implement a strict Content-Security-Policy header.",
     "sqli": "Use parameterized queries (prepared statements) for all database access. "
-            "Never concatenate user input into SQL strings.",
+    "Never concatenate user input into SQL strings.",
     "auth": "Enforce authentication on all protected endpoints. Validate JWT signatures "
-            "server-side with a strong algorithm (RS256). Implement role-based access control.",
+    "server-side with a strong algorithm (RS256). Implement role-based access control.",
 }
 
 
@@ -84,19 +84,22 @@ def draft_finding_report(
     )
 
     # Persist
-    draft.id = context.upsert_report(hunt_id, {
-        "finding_id": finding_id,
-        "title": title,
-        "severity": cvss.severity.value,
-        "cvss_score": cvss.score,
-        "cvss_vector": cvss.vector,
-        "summary": summary,
-        "steps": steps,
-        "impact": impact,
-        "remediation": remediation,
-        "request_ids": request_ids,
-        "status": "draft",
-    })
+    draft.id = context.upsert_report(
+        hunt_id,
+        {
+            "finding_id": finding_id,
+            "title": title,
+            "severity": cvss.severity.value,
+            "cvss_score": cvss.score,
+            "cvss_vector": cvss.vector,
+            "summary": summary,
+            "steps": steps,
+            "impact": impact,
+            "remediation": remediation,
+            "request_ids": request_ids,
+            "status": "draft",
+        },
+    )
 
     return draft
 
@@ -167,19 +170,22 @@ def draft_chain_report(
         status=ReportStatus.DRAFT,
     )
 
-    draft.id = context.upsert_report(hunt_id, {
-        "chain_id": chain_id,
-        "title": title,
-        "severity": severity_str,
-        "cvss_score": cvss_score,
-        "cvss_vector": cvss_vector,
-        "summary": summary,
-        "steps": all_steps,
-        "impact": impact,
-        "remediation": remediation,
-        "request_ids": all_request_ids,
-        "status": "draft",
-    })
+    draft.id = context.upsert_report(
+        hunt_id,
+        {
+            "chain_id": chain_id,
+            "title": title,
+            "severity": severity_str,
+            "cvss_score": cvss_score,
+            "cvss_vector": cvss_vector,
+            "summary": summary,
+            "steps": all_steps,
+            "impact": impact,
+            "remediation": remediation,
+            "request_ids": all_request_ids,
+            "status": "draft",
+        },
+    )
 
     return draft
 
@@ -275,15 +281,15 @@ def _build_impact(finding: dict, ftype: str) -> str:
     """Build concrete impact statement."""
     impact_templates = {
         "idor": "An authenticated attacker can access or modify other users' data "
-                "by manipulating object references. This could lead to mass data exfiltration.",
+        "by manipulating object references. This could lead to mass data exfiltration.",
         "ssrf": "An attacker can force the server to make requests to internal resources, "
-                "potentially accessing cloud metadata, internal APIs, or sensitive services.",
+        "potentially accessing cloud metadata, internal APIs, or sensitive services.",
         "xss": "An attacker can execute arbitrary JavaScript in victims' browsers, "
-               "potentially stealing session cookies, credentials, or performing actions on their behalf.",
+        "potentially stealing session cookies, credentials, or performing actions on their behalf.",
         "sqli": "An attacker can read, modify, or delete database contents. "
-                "Depending on the database configuration, this may escalate to remote code execution.",
+        "Depending on the database configuration, this may escalate to remote code execution.",
         "auth": "An attacker can access protected resources without proper authentication, "
-                "potentially gaining administrative access to the application.",
+        "potentially gaining administrative access to the application.",
     }
     return impact_templates.get(ftype, finding.get("description", "Security impact identified."))
 

@@ -88,13 +88,15 @@ def package_poc(
                 logger.warning("Failed to write HTTP dump %s: %s", dump_path, exc)
                 file_num -= 1
                 continue
-            package.http_dumps.append({
-                "request_id": rid,
-                "file": str(dump_path),
-                "method": record.get("method"),
-                "url": record.get("url"),
-                "status_code": record.get("status_code"),
-            })
+            package.http_dumps.append(
+                {
+                    "request_id": rid,
+                    "file": str(dump_path),
+                    "method": record.get("method"),
+                    "url": record.get("url"),
+                    "status_code": record.get("status_code"),
+                }
+            )
 
     # Write evidence.json
     evidence_path = out / "evidence.json"
@@ -160,10 +162,22 @@ def _format_http_dump(record: dict[str, Any]) -> str:
 
     # Response
     status = record.get("status_code") or 0
-    _REASONS = {200: "OK", 201: "Created", 204: "No Content", 301: "Moved Permanently",
-                302: "Found", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized",
-                403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed",
-                500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable"}
+    _REASONS = {
+        200: "OK",
+        201: "Created",
+        204: "No Content",
+        301: "Moved Permanently",
+        302: "Found",
+        304: "Not Modified",
+        400: "Bad Request",
+        401: "Unauthorized",
+        403: "Forbidden",
+        404: "Not Found",
+        405: "Method Not Allowed",
+        500: "Internal Server Error",
+        502: "Bad Gateway",
+        503: "Service Unavailable",
+    }
     reason = _REASONS.get(status, "Unknown Status")
     lines.append(f"HTTP/1.1 {status} {reason}")
 
