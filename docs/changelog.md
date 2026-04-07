@@ -1,5 +1,6 @@
 # Changelog
 
+- [Unreleased](#unreleased) — in-flight work for 0.8.0
 - [0.7.1](#071--mcp-server-hardening) — 8 defensive fixes across MCP server: `raw_stderr` None crash, port env-var guard, SSRF injection-point falsy check, OOB/shutdown exception narrowing, browser session-not-found error, platform validation, enum reconstruction safety. 0 new tests, 0 regressions (840 tests)
 - [0.7.0](#070--mcp-server) — MCP server exposing all 65 Boba tools as native MCP tool calls. FastMCP, STDIO + streamable-http transports, resource lifecycle management. 0 library changes, 117 new tests, 0 regressions (839 tests)
 - [0.6.3](#063--context-module-split) — `context.py` (2,204 lines) → `context/` package (14 files, 2,399 lines). Mixin-based split: 11 mixins, 70 methods, zero behaviour change. 0 new tests, 0 regressions (722 tests)
@@ -53,6 +54,13 @@
 - [0.2.1](#021--code-quality--correctness) — IPv6 scope handling, URL encoding for payloads, JSON decode safety, IDOR similarity, SQLi threshold, output bounding
 - [0.2.0](#020--interaction-browser-http--vulnerability-testing) — Browser automation, HTTP client, session management, OOB listeners, 5 vuln test tools, Nuclei adapter, CLI extensions
 - [0.1.0](#010--foundation-recon--enumeration) — Core framework, 8 tool adapters, scope engine, SQLite persistence, CLI
+
+---
+
+## Unreleased
+
+**Target:** 0.8.0
+**Scope:** TBD. Add entries here as work lands; promote to a numbered release on tag.
 
 ---
 
