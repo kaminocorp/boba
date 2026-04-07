@@ -115,7 +115,7 @@ Boba wraps these — install whichever you need:
 ```bash
 pip install -e ".[dev]"
 
-pytest                          # 840 tests
+pytest                          # full test suite
 ruff check src/ tests/          # lint
 ruff format --check src/ tests/ # format check
 ```
@@ -127,7 +127,9 @@ Python 3.11+. Fully async. Dataclasses (not Pydantic). Ruff for lint + format (l
 - [x] **V1** — Recon & enumeration (10 adapters, scope engine, persistence, CLI)
 - [x] **V2** — Browser, HTTP interaction, vulnerability testing (5 vuln tools, Nuclei, sessions, OOB)
 - [x] **V3** — Analysis, chaining, severity scoring, report generation (6 more vuln tools, CVSS 3.1, platform formatting)
-- [ ] **V4** — Recon breadth (parameter discovery, API mapping, secret scanning, GraphQL, ASN, cloud buckets)
+- [x] **V4** — Recon breadth (parameter discovery via arjun, API mapping via kiterunner, secret scanning via gitleaks, multipart upload, AI multi-turn conversation testing, WAF detection, AI chain rules)
+- [x] **MCP server** — All 65 tools exposed as native MCP tool calls (FastMCP, STDIO + streamable-http)
+- [ ] **V5** — Continuous monitoring loop (snapshot diffing, scheduled re-runs, new-asset alerts)
 
 ## License
 
