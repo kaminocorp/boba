@@ -12,7 +12,7 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit(
             f"boba-mcp requires the 'mcp' optional dependency ({exc}).\n"
-            "Install with: pip install 'boba[mcp]'"
+            "Install with: pip install 'boba-hunter[mcp]'"
         ) from exc
 
     transport = os.environ.get("BOBA_MCP_TRANSPORT", "stdio")

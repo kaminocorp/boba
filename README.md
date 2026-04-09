@@ -27,9 +27,9 @@ LLM agents can reason and write — but they have no way to hold an authenticate
 ## Quickstart
 
 ```bash
-pip install boba                 # CLI only
-pip install 'boba[mcp]'          # + MCP server (boba-mcp)
-pip install 'boba[oob]'          # + Interactsh OOB listeners
+pip install boba-hunter                 # CLI only (import name stays `boba`)
+pip install 'boba-hunter[mcp]'          # + MCP server (boba-mcp)
+pip install 'boba-hunter[oob]'          # + Interactsh OOB listeners
 pip install -e '.[dev]'          # development install
 
 playwright install chromium      # required for browser-based vuln tests

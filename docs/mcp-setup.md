@@ -8,13 +8,13 @@ Boba's MCP server exposes all 65 tools as native MCP tool calls. Any MCP-compati
 
 ```bash
 # Install Boba with MCP support
-pip install boba[mcp]
+pip install 'boba-hunter[mcp]'
 
 # Or from source (editable)
 pip install -e ".[dev]"
 ```
 
-The `mcp` optional dependency pulls in the MCP Python SDK (FastMCP). Users who only want the CLI don't need it — plain `pip install boba` skips the MCP SDK entirely.
+The `mcp` optional dependency pulls in the MCP Python SDK (FastMCP). Users who only want the CLI don't need it — plain `pip install boba-hunter` skips the MCP SDK entirely. (The distribution name on PyPI is `boba-hunter`; the import name and CLI command remain `boba`.)
 
 ---
 

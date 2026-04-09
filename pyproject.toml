@@ -3,8 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "boba"
+name = "boba-hunter"
 version = "0.8.0.dev0"
+readme = "README.md"
 description = "Agent-native bug bounty hunting framework"
 requires-python = ">=3.11"
 dependencies = [
