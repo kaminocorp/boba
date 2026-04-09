@@ -1,6 +1,6 @@
 # Changelog
 
-- [Unreleased](#unreleased) — post-0.7.1 distribution + cleanup pass: pyproject version sync (0.2.9→0.7.1) and dev bump to 0.8.0.dev0, `boba-mcp` friendly missing-extra error, README install block (`[mcp]`/`[oob]`/`[dev]` extras + `playwright install chromium`), roadmap V4→done + MCP/V5 entries, deprecated `typer[all]` extra dropped (warning gone), ruff format drift cleanup across 19 files, `[Unreleased]` changelog scaffolding. 0 new tests, 0 regressions (840 tests)
+- [Unreleased](#unreleased) — post-0.7.1 distribution + cleanup pass + **first PyPI publication as `boba-hunter` 0.7.1** (the `boba` name was taken on PyPI by an unrelated package; import name and CLI command stay `boba`). Also: pyproject version sync (0.2.9→0.7.1) and dev bump to 0.8.0.dev0, `boba-mcp` friendly missing-extra error, README install block (`[mcp]`/`[oob]`/`[dev]` extras + `playwright install chromium`), roadmap V4→done + MCP/V5 entries, deprecated `typer[all]` extra dropped (warning gone), ruff format drift cleanup across 19 files, `[Unreleased]` changelog scaffolding, `readme = "README.md"` added to pyproject so the PyPI project page actually renders. 0 new tests, 0 regressions (840 tests)
 - [0.7.1](#071--mcp-server-hardening) — 8 defensive fixes across MCP server: `raw_stderr` None crash, port env-var guard, SSRF injection-point falsy check, OOB/shutdown exception narrowing, browser session-not-found error, platform validation, enum reconstruction safety. 0 new tests, 0 regressions (840 tests)
 - [0.7.0](#070--mcp-server) — MCP server exposing all 65 Boba tools as native MCP tool calls. FastMCP, STDIO + streamable-http transports, resource lifecycle management. 0 library changes, 117 new tests, 0 regressions (839 tests)
 - [0.6.3](#063--context-module-split) — `context.py` (2,204 lines) → `context/` package (14 files, 2,399 lines). Mixin-based split: 11 mixins, 70 methods, zero behaviour change. 0 new tests, 0 regressions (722 tests)
@@ -82,12 +82,37 @@
 
 8. **`[Unreleased]` changelog scaffolding:** added an `[Unreleased]` section at the top of the changelog (both index and body) so future work has a place to land before tag time, instead of being reconstructed from `git log` when cutting a release. This entry is the first use of that scaffolding.
 
+### PyPI publication
+
+9. **First real PyPI release — `boba-hunter` 0.7.1:** the project is now installable via `pip install boba-hunter` at <https://pypi.org/project/boba-hunter/0.7.1/>. Published from a detached checkout of the `v0.7.1` tag with two working-tree-only edits (distribution rename + `readme = "README.md"`) fed into `python -m build`, validated with `twine check` (clean after the README fix, previously warning about missing `long_description`), uploaded via `twine upload` using an account-scoped API token, smoke-tested in a throwaway venv (`pip install boba-hunter==0.7.1` → `boba --help` resolves, `boba-mcp` without the `[mcp]` extra fires the friendly error). Neither the wheel nor the sdist includes commits past `v0.7.1`, so the published artifact exactly matches the tag content plus the two metadata deltas — no source changes leaked in. The detached-HEAD edits were discarded after the upload; the source-tree rename is a separate commit on `main` documented below.
+
+10. **Distribution name: `boba` → `boba-hunter` (permanent, PyPI-only):** the `boba` PyPI name is owned by an unrelated package (confirmed via the PyPI JSON API, which is the authoritative check — the HTML UI returns 200 for nonexistent projects and produces false positives). Swapped `[project] name` in `pyproject.toml` to `boba-hunter`. The **import name** and the **CLI command** are unchanged — every `import boba` in `src/` and `tests/` still works because the import name is independent of the PyPI distribution name (same pattern as `beautifulsoup4`/`bs4` or `python-dateutil`/`dateutil`). Users type `pip install boba-hunter` then run `boba ...`. Zero Python source changes were required — only four metadata files moved. 840 tests still passing.
+
+11. **Missing-extra error message corrected:** `src/boba/mcp/__init__.py` previously raised `SystemExit("... pip install 'boba[mcp]'")`. Post-rename, copy-pasting that hint would install a completely different package from PyPI (or fail). Fixed to `pip install 'boba-hunter[mcp]'`. The import name in the error text is unchanged — it's still checking for the `mcp` module, not the `boba-hunter` distribution. No test asserted the old message string, so the rename was behaviorally safe.
+
+12. **README + `docs/mcp-setup.md` install blocks updated:** `pip install boba` → `pip install boba-hunter` across all three extras (base / `[mcp]` / `[oob]`). Added a parenthetical note in the README that the import name stays `boba` — this asymmetry is common in the packaging ecosystem but worth flagging explicitly so users don't wonder why `pip install boba-hunter` lets them `import boba`. Historical docs (`docs/changelog.md` body below this entry, `docs/executing/0.7.1-release-plan.md`, `docs/completions/mcp-server-implementation-plan.md`) were **intentionally not rewritten** — they're append-only records of what was true at their respective points in time, and rewriting them would misrepresent the project's history.
+
+### Pending
+
+Not yet done as of this entry — tracked here so the next session can pick them up without re-deriving context:
+
+- **Token rotation (account-scoped → project-scoped):** the PyPI API token used for the initial upload is scoped to "Entire account (all projects)" because `boba-hunter` didn't exist on PyPI at creation time, so there was nothing to scope to. Now that the project exists, create a new token at <https://pypi.org/manage/account/token/> with **Scope: Project → boba-hunter**, swap it into `~/.pypirc`, verify with a dry-run, then delete the old account-scoped token. Reduces blast radius on leak from "publish malicious versions of any of my PyPI projects" to "publish malicious versions of `boba-hunter` only."
+
+- **Mystery token investigation:** an older account-scoped PyPI token (created `2026-03-19`, first embedded UUID `b1cb28ba-013c-46ff-af20-3e028f8dd775`) was discovered already sitting in `~/.pypirc` at the start of this session, with no corresponding memory of its creation. Audit the token list on the PyPI account page; if unrecognized, revoke.
+
+- **Push `main` to `origin`:** the post-rename commit (`5792d96`) is local-only; `origin/main` does not yet know about the distribution rename. Until pushed, cloning the repo fresh will produce a `pyproject.toml` that still says `name = "boba"` — which would build a wheel that PyPI would reject as a different package on the next upload attempt.
+
+- **Stale tooling warnings in the published wheel:** users installing `boba-hunter==0.7.1` currently see `WARNING: typer 0.24.1 does not provide the extra 'all'` because the `typer[all]` → `typer>=0.12` fix landed in commit `22bde41` *after* the `v0.7.1` tag. Cosmetic, not release-blocking, but a candidate to fix in 0.7.2 or fold into 0.8.0 (alongside a few other small post-0.7.1 improvements).
+
+- **Move `docs/executing/0.7.1-release-plan.md` → `docs/completions/`:** every step in the plan has been executed (including Step 6 PyPI publication and Step 7 GitHub release, both of which this session confirmed). Keeping it in `executing/` is misleading — that directory should only contain in-flight work. Low priority, but a small hygiene win for the next contributor.
+
 ### Modified files
 
-- `pyproject.toml` — version, typer dep
-- `README.md` — install block, roadmap, dev block test count
-- `src/boba/mcp/__init__.py` — friendly missing-extra error
-- `docs/changelog.md` — `[Unreleased]` scaffolding (this entry)
+- `pyproject.toml` — version, typer dep, **`name = "boba-hunter"`**, `readme = "README.md"`
+- `README.md` — install block, roadmap, dev block test count, **install commands updated for `boba-hunter` rename**
+- `docs/mcp-setup.md` — **install block updated for `boba-hunter` rename**
+- `src/boba/mcp/__init__.py` — friendly missing-extra error, **error text points at `boba-hunter[mcp]`**
+- `docs/changelog.md` — `[Unreleased]` scaffolding + **this PyPI publication entry**
 - `docs/executing/0.7.1-release-plan.md` — new release plan doc
 - 19 files reformatted by ruff (no behaviour change)
 
@@ -95,9 +120,18 @@
 
 - `647e0c4` — ruff format drift cleanup (19 files)
 - `e8af31c` — release plan in `docs/executing/`
-- `2ffcc69` — **Release 0.7.1** (tagged `v0.7.1`)
+- `2ffcc69` — **Release 0.7.1** (tagged `v0.7.1`, this is what PyPI published)
 - `9bc4764` — post-release hygiene (`0.8.0.dev0`, `[Unreleased]` scaffolding)
 - `22bde41` — typer extra drop, README roadmap, test-count removal
+- `589be42` — `[Unreleased]` entry covering the distribution + cleanup pass (items 1–8 above)
+- `5792d96` — **post-PyPI rename on `main`:** `boba` → `boba-hunter` in `pyproject.toml`, README, `docs/mcp-setup.md`, and the `boba-mcp` error message; `readme = "README.md"` added to pyproject (items 9–12 above). *Not yet pushed to `origin`.*
+
+### External state changed
+
+- **PyPI:** `boba-hunter` project created; `0.7.1` uploaded (wheel + sdist). Immutable — cannot be deleted, can only be yanked.
+- **GitHub:** release at <https://github.com/kaminocorp/boba/releases/tag/v0.7.1> already existed from `2026-04-07` (created by a prior session, not this one); this session confirmed its content matches what we would have posted and took no action.
+- **Git tags:** `v0.7.1` already pushed to `origin` (hash `69b97385b406be874c6ec383902bbfc64b68187e`); verified via `git ls-remote --tags origin v0.7.1`.
+- **Local config:** `~/.pypirc` updated with a fresh account-scoped API token and `chmod 600`'d (was previously `rw-r--r--`, world-readable). Old token from `2026-03-19` overwritten in the file — see "Mystery token investigation" in Pending.
 
 ---
 
